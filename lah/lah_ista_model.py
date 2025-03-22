@@ -105,6 +105,22 @@ class LAHISTAmodel(L2WSmodel):
     def set_params_for_nesterov(self):
         self.init_params()
         # self.params = [jnp.log(1 / self.smooth_param * jnp.ones((self.step_varying_num + 1, 1)))]
+        
+    # def pep_cvxpylayer(self, params):
+    #     """
+    #     1: create layer (once, with params)
+    #     2: do forward pass
+    #     """
+    #     mu_str_cvx = 0
+    #     L_smooth = 0
+        
+    #     # forward pass, i.e., solve the sdp
+    #     sol = layer(params)
+        
+    #     # get the actual loss
+        
+        
+    #     return loss
 
 
     # def set_params_for_silver(self):

@@ -1113,10 +1113,10 @@ def populate_curr_method_dict(method, example, cfg, constrained):
                             # 'dist_opts': dist_opts}
     else:
         obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
-        if example == 'ridge_regression' and method[:3] == 'lah':
-            step_sizes_dict = get_lah_gd_step_size(example, cfg)
-            lah_step_sizes = step_sizes_dict[method].to_numpy()[:, 1]
-            obj_diffs = ridge_get_subopts(example, cfg, lah_step_sizes)
+        # if example == 'ridge_regression' and method[:3] == 'lah':
+        #     step_sizes_dict = get_lah_gd_step_size(example, cfg)
+        #     lah_step_sizes = step_sizes_dict[method].to_numpy()[:, 1]
+        #     obj_diffs = ridge_get_subopts(example, cfg, lah_step_sizes)
         curr_method_dict = {'obj_diff': obj_diffs}
 
     return curr_method_dict

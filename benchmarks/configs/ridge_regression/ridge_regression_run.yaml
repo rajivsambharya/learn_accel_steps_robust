@@ -1,15 +1,15 @@
 nn_cfg:
-  lr: 1e-1
+  lr: 1e-3
   method: adam
   batch_size: 100
-  epochs: 200
+  epochs: 500
 
 data:
   datetime: ''
 
 train_unrolls: 10
 eval_unrolls: 1000
-eval_every_x_epochs: 100 #2 #50 #50
+eval_every_x_epochs: 50 #2 #50 #50
 save_every_x_epochs: 1
 test_every_x_epochs: 1
 write_csv_every_x_batches: 1

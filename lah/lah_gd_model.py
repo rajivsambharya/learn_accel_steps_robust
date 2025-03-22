@@ -8,6 +8,8 @@ import numpy as np
 from lah.algo_steps import k_steps_eval_lah_gd, k_steps_train_lah_gd, k_steps_eval_nesterov_gd, k_steps_eval_conj_grad
 from lah.l2ws_model import L2WSmodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
+from jaxopt import Bisection
+from functools import reduce
 
 
 class LAHGDmodel(L2WSmodel):
@@ -34,6 +36,7 @@ class LAHGDmodel(L2WSmodel):
         # p = jnp.diag(P)
         # cond_num = jnp.max(p) / jnp.min(p)
         evals, evecs = jnp.linalg.eigh(P)
+        self.evals = evals
 
         self.str_cvx_param = jnp.min(evals)
         self.smooth_param = jnp.max(evals)
@@ -49,6 +52,8 @@ class LAHGDmodel(L2WSmodel):
         self.conj_grad_eval_fn = partial(k_steps_eval_conj_grad, P=P,
                                        jit=self.jit)
         self.out_axes_length = 5
+        # import pdb
+        # pdb.set_trace()
 
         # self.lah_train_inputs = self.q_mat_train
         N = self.q_mat_train.shape[0]
@@ -77,7 +82,39 @@ class LAHGDmodel(L2WSmodel):
             self.train_case = 'two_step_quad'
         elif self.train_unrolls == 3:
             self.train_case = 'three_step_quad'
+            
+    
         
+    def pep_cvxpylayer(self, params):
+        # compute_pep_guarantee(step_sizes, lambd)
+        # compute_pep_guarantee_partial = partial(compute_pep_guarantee, step_sizes=params[0])
+        # bisec = Bisection(optimality_fun=compute_pep_guarantee_partial, lower=self.str_cvx_param, upper=self.smooth_param,
+        #                               check_bracket=False,
+        #                               jit=True)
+        # bisec = Bisection(optimality_fun=compute_pep_guarantee, lower=self.str_cvx_param, upper=self.smooth_param,
+        #                               check_bracket=False,
+        #                               jit=True)
+        
+        # out = bisec.run(step_sizes=params[0])
+        # worst_case_bound = compute_pep_guarantee(out.params, params[0])
+        # import pdb
+        # pdb.set_trace()
+        
+        step_sizes = jnp.exp(params[0][:,0])
+        # matrices = [jnp.eye(self.n) - step_sizes[i] * self.P for i in range(step_sizes.size)]
+        
+        # product = reduce(jnp.matmul, matrices)
+        # product = jnp.prod(jnp.array([1 - step_sizes[i] * self.evals[0]]))
+        # step_sizes = params[0][:,0]
+        # pp = jnp.prod(jnp.array([1 - step_sizes[i] * self.evals[0] for i in range(step_sizes.size)]))
+        # worst_case_bound = jnp.linalg.norm(product, ord=2)
+        terms = 1 - step_sizes[None, :] * self.evals[:, None]   # shape (N, K)
+        products = jnp.prod(terms, axis=1)                      # shape (N,)
+        worst_case_bound = jnp.max(products)
+        
+        # import pdb
+        # pdb.set_trace()
+        return worst_case_bound #compute_pep_guarantee_partial(bisec)
 
 
     def transform_params(self, params, n_iters):
@@ -89,7 +126,8 @@ class LAHGDmodel(L2WSmodel):
 
     def perturb_params(self):
         # init step-varying params
-        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=1e-5, a_max=1e0)) * 0.00001
+        # noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=1e-5, a_max=1e0)) * 0.01
+        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=-1, a_max=1)) * 0.01
         step_varying_params = jnp.log(noise + 2 / (self.smooth_param + self.str_cvx_param)) * jnp.ones((self.step_varying_num, 1))
 
         # init steady_state_params
@@ -331,3 +369,7 @@ def sigmoid(x):
 
 def sigmoid_inv(beta):
     return jnp.log(beta / (1 - beta))
+
+def compute_pep_guarantee(lambd, step_sizes):
+    # return jnp.prod([1 - step_sizes[i] * lambd] for i in range(step_sizes.size))
+    return jnp.prod(jnp.array([1 - step_sizes[i] * lambd for i in range(step_sizes.size)]))

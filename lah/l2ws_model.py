@@ -559,7 +559,10 @@ class L2WSmodel(object):
         def loss_fn(params, inputs, b, iters, z_stars, key):
             if diff_required:
                 losses = batch_predict(params, inputs, b, iters, z_stars, key)
-                return losses.mean()
+                
+                # update so that we have pep
+                pep_loss = self.pep_cvxpylayer(params)
+                return losses.mean() + (pep_loss - 0.99650435 ** iters) ** 2
             
                 # return losses.mean()
                 q = losses.mean() / self.penalty_coeff
