@@ -27,7 +27,8 @@ def test_eval_write(test_writer, test_logf, l2ws_model):
             'iter': l2ws_model.state.iter_num,
             'train_loss': moving_avg,
             'test_loss': test_loss,
-            'time_per_iter': time_per_iter
+            'time_per_iter': time_per_iter,
+            'pep_penalty': l2ws_model.pep_penalty
         })
         test_logf.flush()
     return test_writer, test_logf, l2ws_model

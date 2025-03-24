@@ -830,7 +830,7 @@ class Workspace:
 
         self.test_logf = open('train_test_results.csv', 'a')
         fieldnames = ['iter', 'train_loss', 'test_loss', 'penalty', 'avg_posterior_var',
-                      'stddev_posterior_var', 'prior', 'mean_squared_w', 'time_per_iter']
+                      'stddev_posterior_var', 'prior', 'pep_penalty', 'time_per_iter']
         self.test_writer = csv.DictWriter(
             self.test_logf, fieldnames=fieldnames)
         if os.stat('train_results.csv').st_size == 0:
@@ -1075,17 +1075,11 @@ class Workspace:
                 # train the jitted epochs
                 curr_params, state, epoch_train_losses, time_train_per_epoch = self.train_jitted_epochs(
                     permutation, epoch, window_indices, steady_state=steady_state)
-                # import pdb
-                # pdb.set_trace()
                 
                 self.l2ws_model.params = [prev_params]
-                # import pdb
-                # pdb.set_trace()
                 
                 # insert the curr_params into the entire params
                 if self.l2ws_model.lah:
-                    # import pdb
-                    # pdb.set_trace()
                     pp = self.l2ws_model.params[0].at[window_indices, :].set(curr_params[0])
                     params = [pp]
                 else:
@@ -1103,9 +1097,11 @@ class Workspace:
                     list(epoch_train_losses)
 
                 # write train results
-                self.writer, self.logf = write_train_results(self.writer, self.logf, 
+                self.writer, self.logf = write_train_results(self.writer, 
+                                                             self.logf, 
                                                                 self.l2ws_model.tr_losses_batch, 
-                                                                loop_size, prev_batches,
+                                                                loop_size, 
+                                                                prev_batches,
                                                                 epoch_train_losses, 
                                                                 time_train_per_epoch)
 

@@ -28,7 +28,8 @@ dependencies = [
     "imageio",
     "networkx",
     "pepit",
-    "jaxopt"
+    "jaxopt",
+    "cvxpylayers"
 ]
 
 [tool.setuptools.packages.find]
