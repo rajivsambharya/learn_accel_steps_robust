@@ -61,11 +61,11 @@ class LAHISTAmodel(L2WSmodel):
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, self.n))
         
-        self.pep_layer = self.create_nesterov_pep_sdp_layer(10)
+         #20)
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
 
 
-        e2e_loss_fn = self.create_end2end_loss_fn
+        # e2e_loss_fn = self.create_end2end_loss_fn
 
 
 
@@ -131,29 +131,36 @@ class LAHISTAmodel(L2WSmodel):
         
     def pep_cvxpylayer(self, params):
         step_sizes = params[:,0]
-        beta = convert_t_to_beta(params[:,1])
+        # beta = convert_t_to_beta(params[:,1])
+        beta = params[:,1]
         beta_sq = beta ** 2
         k = step_sizes.size
         # cross_step_sizes = jnp.outer(step_sizes, step_sizes)
         
         # G, T = self.pep_layer(step_sizes, cross_step_sizes)
-        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "SCS", "verbose": True})
+        # import pdb
+        # pdb.set_trace()
+        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True})
         x_k_ind = get_x_index_subdiff(k, k)
         # import pdb
         # pdb.set_trace()
         return H[-1] - H[0]
 
     def init_params(self):
+        self.pep_layer = self.create_nesterov_pep_sdp_layer(self.step_varying_num)
         # init step-varying params
         # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
         step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
         # beta_params = jnp.array([i / (i+3) for i in range(self.step_varying_num)])
-        beta_params = jnp.zeros(self.step_varying_num)
+        t_params = jnp.ones(self.step_varying_num)
         t = 1
         for i in range(1, self.step_varying_num):
             t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
-            beta_params = beta_params.at[i].set(jnp.log(t))
-        step_varying_params = step_varying_params.at[:, 1].set(beta_params)
+            t_params = t_params.at[i].set(t) #(jnp.log(t))
+        beta_params = convert_t_to_beta(t_params)
+        # import pdb
+        # pdb.set_trace()
+        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
 
         # init steady_state_params
         steady_state_params = 0 * jnp.ones((1, 2)) #sigmoid_inv(1 / (self.smooth_param)) * jnp.ones((1, 1))
@@ -332,32 +339,37 @@ class LAHISTAmodel(L2WSmodel):
                     constraints.append((H[i] - H[j]) >=  G[s_j_ind, x_i_ind] - G[s_j_ind, x_j_ind] + 1  / (2 * self.smooth_param) * (G[s_i_ind, s_i_ind] + G[s_j_ind, s_j_ind] - 2 * G[s_i_ind, s_j_ind])) 
                     
         for i in range(k):
+            beta_ind = i
             x_i_ind = 3 + i
             y_i_ind = y_ind_start + i + 1
             y_prev_i_ind = 0 if y_i_ind == 3 else y_i_ind - 1
-            constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[i-1]+2*beta_param[i-1]+1)  * G[y_i_ind, y_i_ind] + beta_param_sq[i-1] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[i-1] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[i-1] + beta_param_sq[i-1]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[i-1] + 1) * G[x_i_ind, y_i_ind] == 0)
+            constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[beta_ind] + 2*beta_param[beta_ind] + 1)  * G[y_i_ind, y_i_ind] + beta_param_sq[beta_ind] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[beta_ind] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[beta_ind] + beta_param_sq[beta_ind]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[beta_ind] + 1) * G[x_i_ind, y_i_ind] == 0)
+            # import pdb
+            # pdb.set_trace()
 
-        # constraints.append(G <= 10)
-        # constraints.append(G >= -10)
+        constraints.append(G <= 1)
+        constraints.append(G >= -1)
         prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
-        step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
+        # step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
         
-        # t_vals = np.ones(num_iters)
-        # beta_vals = np.zeros(num_iters)
+        # t_vals = np.ones(num_iters+1)
         # t = 1
-        # for i in range(1, num_iters):
+        # for i in range(1, num_iters+1):
         #     t = .5 * (1 + np.sqrt(1 + 4 * t ** 2))
         #     t_vals[i] = t
-        #     beta_vals[i] = (t_vals[i-1] - 1) / t
-            
+        # beta_vals = jnp.array(convert_t_to_beta(t_vals))[:10]
+        
         # beta_param.value = beta_vals #np.ones(num_iters)
-        # beta_param_sq.value = beta_vals**2 #np.ones(num_iters)
-        # beta_param.value = beta_vals #np.ones(num_iters)
-        # beta_param_sq.value = beta_vals**2 #np.ones(num_iters)
-        # prob.solve(verbose=True, solver=cp.SCS)
+        # beta_param_sq.value = (beta_param.value)**2 #np.ones(num_iters)
+        # prob.solve(verbose=True, solver=cp.CLARABEL)
         # import pdb
         # pdb.set_trace()
         cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param, beta_param, beta_param_sq], variables=[G, H])
+        
+        # step_sizes = jnp.ones(num_iters) / jnp.array(self.smooth_param)
+        # G, H = cvxpylayer(step_sizes, beta_vals, beta_vals ** 2, solver_args={"solve_method": "CLARABEL", "verbose": True})
+        # import pdb
+        # pdb.set_trace()
         return cvxpylayer
 
 
@@ -628,5 +640,7 @@ def collect_nesterov_subdiff_indices(k, num_traj=1):
 def convert_t_to_beta(t_vals):
     beta_vals = jnp.ones(t_vals.size)
     for i in range(1, t_vals.size):
-        beta_vals = beta_vals.at[i].set((t_vals[i-1] - 1) / t_vals[i])
+        beta_vals = beta_vals.at[i-1].set((t_vals[i-1] - 1) / t_vals[i])
+    # import pdb
+    # pdb.set_trace()
     return beta_vals
