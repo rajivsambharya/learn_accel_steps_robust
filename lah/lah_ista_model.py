@@ -61,7 +61,7 @@ class LAHISTAmodel(L2WSmodel):
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, self.n))
         
-        self.pep_layer = self.create_nesterov_pep_sdp_layer(1)
+        self.pep_layer = self.create_nesterov_pep_sdp_layer(10)
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
 
 
@@ -129,12 +129,15 @@ class LAHISTAmodel(L2WSmodel):
         # steady_state_params = sigmoid_inv(params[self.step_varying_num:, :1] * self.smooth_param / 2)
         # self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         
-    def pep_cvxpylayer(self, step_sizes):
+    def pep_cvxpylayer(self, params):
+        step_sizes = params[:,0]
+        beta = convert_t_to_beta(params[:,1])
+        beta_sq = beta ** 2
         k = step_sizes.size
         # cross_step_sizes = jnp.outer(step_sizes, step_sizes)
         
         # G, T = self.pep_layer(step_sizes, cross_step_sizes)
-        G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
+        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "SCS", "verbose": True})
         x_k_ind = get_x_index_subdiff(k, k)
         # import pdb
         # pdb.set_trace()
@@ -298,8 +301,8 @@ class LAHISTAmodel(L2WSmodel):
                         constraints.append(G[x_i_ind, y_i_ind] - G[x_i_ind, y_j_ind] -G[y_i_ind, y_i_ind] +  G[y_i_ind, y_j_ind] -alpha_i*G[s_i_ind, y_i_ind] +alpha_i* G[s_i_ind, y_j_ind] >= 0)
                     else:
                         constraints.append((F[j] - F[i])  + G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
-                    import pdb
-                    pdb.set_trace()
+                    # import pdb
+                    # pdb.set_trace()
                     
             # constraints.append(G[x_i_prev_ind, x_i_ind] - G[x_i_prev_ind, 0] -G[x_i_ind, x_i_ind] +  G[x_i_ind, 0] -alpha_i*G[s_i_ind, x_i_ind] +alpha_i* G[s_i_ind, 0] >= 0)
 
@@ -334,16 +337,27 @@ class LAHISTAmodel(L2WSmodel):
             y_prev_i_ind = 0 if y_i_ind == 3 else y_i_ind - 1
             constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[i-1]+2*beta_param[i-1]+1)  * G[y_i_ind, y_i_ind] + beta_param_sq[i-1] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[i-1] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[i-1] + beta_param_sq[i-1]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[i-1] + 1) * G[x_i_ind, y_i_ind] == 0)
 
-        constraints.append(G <= 10)
-        constraints.append(G >= -10)
+        # constraints.append(G <= 10)
+        # constraints.append(G >= -10)
         prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
         step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
-        beta_param.value = np.zeros(num_iters)
-        beta_param_sq.value = np.zeros(num_iters)
-        prob.solve(verbose=True, solver=cp.CLARABEL)
-        import pdb
-        pdb.set_trace()
-        cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param], variables=[G, H])
+        
+        # t_vals = np.ones(num_iters)
+        # beta_vals = np.zeros(num_iters)
+        # t = 1
+        # for i in range(1, num_iters):
+        #     t = .5 * (1 + np.sqrt(1 + 4 * t ** 2))
+        #     t_vals[i] = t
+        #     beta_vals[i] = (t_vals[i-1] - 1) / t
+            
+        # beta_param.value = beta_vals #np.ones(num_iters)
+        # beta_param_sq.value = beta_vals**2 #np.ones(num_iters)
+        # beta_param.value = beta_vals #np.ones(num_iters)
+        # beta_param_sq.value = beta_vals**2 #np.ones(num_iters)
+        # prob.solve(verbose=True, solver=cp.SCS)
+        # import pdb
+        # pdb.set_trace()
+        cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param, beta_param, beta_param_sq], variables=[G, H])
         return cvxpylayer
 
 
@@ -610,3 +624,9 @@ def collect_nesterov_subdiff_indices(k, num_traj=1):
             s_list.append(get_s_index(j, k, traj)) # but for y we get the previous value
 
     return y_list, x_list, s_list
+
+def convert_t_to_beta(t_vals):
+    beta_vals = jnp.ones(t_vals.size)
+    for i in range(1, t_vals.size):
+        beta_vals = beta_vals.at[i].set((t_vals[i-1] - 1) / t_vals[i])
+    return beta_vals
