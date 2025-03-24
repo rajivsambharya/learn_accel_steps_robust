@@ -324,7 +324,7 @@ def fp_train_lah_fista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     return z_next, y_next, t_next, loss_vec
 
 
-def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised, z_star, jit):
+def k_steps_eval_lah_fista(k, z0, q, params, lambd, A, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
@@ -334,7 +334,6 @@ def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised
                               z_star=z_star,
                               lambd=lambd,
                               A=A,
-                              safeguard_step=safeguard_step,
                               c=q,
                               ista_steps=params
                               )
@@ -351,9 +350,9 @@ def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 
 
-def fp_eval_lah_fista(i, val, supervised, z_star, A, b, lambd, ista_steps):
+def fp_eval_lah_fista(i, val, supervised, z_star, A, c, lambd, ista_steps):
     z, y, t, loss_vec, obj_diffs, z_all = val
-    z_next, y_next, t_next = fixed_point_fista(z, y, ista_steps[i,0], A, b, lambd, ista_steps[i,0])
+    z_next, y_next, t_next = fixed_point_fista(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
     if supervised:
         # diff = 10 * jnp.log10(jnp.linalg.norm(z - z_star) ** 2 / jnp.linalg.norm(z_star) ** 2)
         diff = jnp.linalg.norm(z - z_star)
@@ -361,8 +360,8 @@ def fp_eval_lah_fista(i, val, supervised, z_star, A, b, lambd, ista_steps):
         diff = jnp.linalg.norm(z_next - z)
     loss_vec = loss_vec.at[i].set(diff)
 
-    obj = .5 * jnp.linalg.norm(A @ z - b) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
-    opt_obj = .5 * jnp.linalg.norm(A @ z_star - b) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
+    obj = .5 * jnp.linalg.norm(A @ z - c) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
+    opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
 
     z_all = z_all.at[i, :].set(z_next)

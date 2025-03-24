@@ -5,7 +5,7 @@ from jax import random
 
 import numpy as np
 
-from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista
+from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista
 from lah.l2ws_model import L2WSmodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
@@ -49,10 +49,9 @@ class LAHISTAmodel(L2WSmodel):
 
         safeguard_step = 1 / self.smooth_param
 
-        self.k_steps_train_fn = partial(k_steps_train_lah_ista, lambd=lambd, A=A,
+        self.k_steps_train_fn = partial(k_steps_train_lah_fista, lambd=lambd, A=A,
                                         jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, 
-                                       safeguard_step=jnp.array([safeguard_step]),
+        self.k_steps_eval_fn = partial(k_steps_eval_lah_fista, lambd=lambd, A=A, 
                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_fista, lambd=lambd, A=A,
                                        jit=self.jit)
@@ -77,11 +76,10 @@ class LAHISTAmodel(L2WSmodel):
     #     opt_vals = batch_f(self.z_stars_train, self.theta)
 
     def transform_params(self, params, n_iters):
-        # n_iters = params[0].size
-        transformed_params = jnp.zeros((n_iters, 1))
-        transformed_params = transformed_params.at[:n_iters - 1, 0].set(jnp.exp(params[0][:n_iters - 1, 0]))
-        transformed_params = transformed_params.at[n_iters - 1, 0].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, 0]))
-        # transformed_params = jnp.clip(transformed_params, a_max=1.0)
+        # transformed_params = jnp.zeros((n_iters, 1))
+        transformed_params = jnp.zeros((n_iters, 2))
+        transformed_params = transformed_params.at[:n_iters - 1, :].set(jnp.exp(params[0][:n_iters - 1, :]))
+        transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
         return transformed_params
 
     # def perturb_params(self):
@@ -142,12 +140,21 @@ class LAHISTAmodel(L2WSmodel):
 
     def init_params(self):
         # init step-varying params
-        step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
+        # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
+        step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
+        # beta_params = jnp.array([i / (i+3) for i in range(self.step_varying_num)])
+        beta_params = jnp.zeros(self.step_varying_num)
+        t = 1
+        for i in range(1, self.step_varying_num):
+            t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+            beta_params = beta_params.at[i].set(jnp.log(t))
+        step_varying_params = step_varying_params.at[:, 1].set(beta_params)
 
         # init steady_state_params
-        steady_state_params = 0 * jnp.ones((1, 1)) #sigmoid_inv(1 / (self.smooth_param)) * jnp.ones((1, 1))
+        steady_state_params = 0 * jnp.ones((1, 2)) #sigmoid_inv(1 / (self.smooth_param)) * jnp.ones((1, 1))
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+        
         # sigmoid_inv(beta)
 
     def create_quad_prox_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
@@ -248,7 +255,7 @@ class LAHISTAmodel(L2WSmodel):
                     stochastic_params = 2 / self.smooth_param * sigmoid(params[0][:n_iters, 0])
                 else:
                     # for step-varying training
-                    stochastic_params = jnp.exp(params[0][:n_iters, 0])
+                    stochastic_params = jnp.exp(params[0][:n_iters, :])
             else:
                 if special_algo == 'silver' or special_algo == 'conj_grad':
                     stochastic_params = params[0]
@@ -273,10 +280,12 @@ class LAHISTAmodel(L2WSmodel):
 
             # stochastic_params = params[0][:n_iters, 0]
             if special_algo == 'nesterov':
+                import pdb
+                pdb.set_trace()
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
-                                   params=stochastic_params,
+                                   params=stochastic_params[:,0],
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
@@ -286,7 +295,7 @@ class LAHISTAmodel(L2WSmodel):
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
-                                   params=stochastic_params,
+                                   params=stochastic_params[:,0],
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
