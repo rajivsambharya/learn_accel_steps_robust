@@ -980,6 +980,7 @@ class Workspace:
                 # nesterov
                 self.l2ws_model.set_params_for_nesterov()
                 self.eval_iters_train_and_test('nesterov', None)
+                self.l2ws_model.perturb_params()
 
             if self.l2ws_model.algo == 'lah_gd' or self.l2ws_model.algo == 'lah_stochastic_gd':
                 # conj_grad

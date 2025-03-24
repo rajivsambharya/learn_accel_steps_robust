@@ -61,7 +61,8 @@ class LAHISTAmodel(L2WSmodel):
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, self.n))
         
-        self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
+        self.pep_layer = self.create_nesterov_pep_sdp_layer(1)
+        # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
 
 
         e2e_loss_fn = self.create_end2end_loss_fn
@@ -82,15 +83,16 @@ class LAHISTAmodel(L2WSmodel):
         transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
         return transformed_params
 
-    # def perturb_params(self):
-    #     # init step-varying params
-    #     noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=1e-5, a_max=1e0)) * 0.00001
-    #     step_varying_params = jnp.log(noise + 2 / (self.smooth_param + self.str_cvx_param)) * jnp.ones((self.step_varying_num, 1))
+    def perturb_params(self):
+        # init step-varying params
+        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 2)), a_min=-1, a_max=1)) * 0.01
+        # step_varying_params = jnp.log(noise + 2 / (self.smooth_param)) * jnp.ones((self.step_varying_num, 1))
+        step_varying_params = noise + self.params[0][:self.step_varying_num, :]
 
-    #     # init steady_state_params
-    #     steady_state_params = sigmoid_inv(self.smooth_param / (self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 1))
+        # init steady_state_params
+        steady_state_params = sigmoid_inv(self.smooth_param / (self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 2))
 
-    #     self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+        self.params = [jnp.vstack([step_varying_params, steady_state_params])]
 
 
     def set_params_for_nesterov(self):
@@ -236,6 +238,111 @@ class LAHISTAmodel(L2WSmodel):
                     constraints.append((H[i] - H[j]) >=  G[s_j_ind, x_i_ind] - G[s_j_ind, x_j_ind] + 1  / (2 * self.smooth_param) * (G[s_i_ind, s_i_ind] + G[s_j_ind, s_j_ind] - 2 * G[s_i_ind, s_j_ind])) 
 
         prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
+        cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param], variables=[G, H])
+        return cvxpylayer
+    
+    def create_nesterov_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
+        """
+        ordering: x*, x_0,...,x_{p-1}, s*,s_0,..,s_{p-1}
+        """
+        proj = True
+        step_sizes_param = cp.Parameter(num_iters)
+        beta_param = cp.Parameter(num_iters)
+        beta_param_sq = cp.Parameter(num_iters)
+
+        k = num_iters #step_sizes.size
+        G = cp.Variable((3*(k+1)+2, 3*(k+1)+2), symmetric=True) # gram matrix
+        H = cp.Variable(k+2)
+        if not proj:
+            F = cp.Variable(k+1)
+
+        tol = 0
+        constraints = [G >> tol*np.eye(3*(k+1)+2)]
+
+        # denom
+        constraints.append(G[0, 0] - 2*G[0,1] + G[1, 1] == 1)
+        
+        # make y0 = z0
+        y_ind_start = 2*(k+1)+2
+        constraints.append(G[0, 0] - 2*G[0,y_ind_start] + G[y_ind_start, y_ind_start] == 0)
+
+        # num
+        x_k_ind = get_x_index_subdiff(k, k)
+        print('x_k_ind', x_k_ind)
+        
+        # subgradient inequalities: ∂h(x_i)^T (x_i - x_j) >= 0
+        # (y_{i-1} - x_i)^T (x_i - x_j) >= 0 -- based on triples (x_i, y_{i-1}, x_j)
+        # x_list_subgrad, s_list_subgrad = collect_subgrad_subdiff_indices(k, 1)
+        y_list, x_list, s_list = collect_nesterov_subdiff_indices(k)
+        print('y_list', y_list)
+        print('x_list', x_list)
+        print('s_list', s_list)
+        for i in range(len(x_list)):
+            y_i_ind = y_list[i]
+            x_i_ind = x_list[i]
+            s_i_ind = s_list[i]
+            if x_i_ind == 1:
+                x_i_prev_ind = x_i_ind
+                alpha_i = 1
+            elif x_i_ind == 3:
+                x_i_prev_ind = 0
+                alpha_i = step_sizes_param[0]
+            else:
+                x_i_prev_ind = x_i_ind - 1
+                alpha_i = step_sizes_param[i-1]
+            for j in range(len(y_list)):
+                y_j_ind = y_list[j]
+                if y_j_ind != y_i_ind:
+                    if proj:
+                        # constraints.append(G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
+                        constraints.append(G[x_i_ind, y_i_ind] - G[x_i_ind, y_j_ind] -G[y_i_ind, y_i_ind] +  G[y_i_ind, y_j_ind] -alpha_i*G[s_i_ind, y_i_ind] +alpha_i* G[s_i_ind, y_j_ind] >= 0)
+                    else:
+                        constraints.append((F[j] - F[i])  + G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
+                    import pdb
+                    pdb.set_trace()
+                    
+            # constraints.append(G[x_i_prev_ind, x_i_ind] - G[x_i_prev_ind, 0] -G[x_i_ind, x_i_ind] +  G[x_i_ind, 0] -alpha_i*G[s_i_ind, x_i_ind] +alpha_i* G[s_i_ind, 0] >= 0)
+
+
+        # x_list, x_next_list, s_list, step_size_list = collect_linear_subdiff_indices(k, [step_sizes_param]) # Q u_i = v_i for i =1, ..., len(x_list) (these are diff)
+        x_list, s_list = collect_linear_grad_indices(k)
+        print('x_list', x_list)
+        # print('x_next_list', x_next_list)
+        print('s_list', s_list)
+        # print('step_size_list', step_size_list)
+
+        # u_i^T v_j = u_j^T v_i (i neq j) where u_i = x_i i=0,...,k-1 and v_j = 1 / alpha_j (x_j - y_j)
+        for i in range(len(x_list)):
+            x_i_ind = x_list[i]
+            # x_next_i_ind = x_next_list[i]
+            s_i_ind = s_list[i]
+            # alpha_i = step_size_list[i]
+            # if i == 0:
+            #     alpha_i_sq = 1
+            # else:
+            #     alpha_i_sq = cross_alpha_ij[i-1, i-1]
+            for j in range(len(x_list)):
+                if i != j:
+                    x_j_ind = x_list[j]
+                    s_j_ind = s_list[j]
+
+                    constraints.append((H[i] - H[j]) >=  G[s_j_ind, x_i_ind] - G[s_j_ind, x_j_ind] + 1  / (2 * self.smooth_param) * (G[s_i_ind, s_i_ind] + G[s_j_ind, s_j_ind] - 2 * G[s_i_ind, s_j_ind])) 
+                    
+        for i in range(k):
+            x_i_ind = 3 + i
+            y_i_ind = y_ind_start + i + 1
+            y_prev_i_ind = 0 if y_i_ind == 3 else y_i_ind - 1
+            constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[i-1]+2*beta_param[i-1]+1)  * G[y_i_ind, y_i_ind] + beta_param_sq[i-1] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[i-1] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[i-1] + beta_param_sq[i-1]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[i-1] + 1) * G[x_i_ind, y_i_ind] == 0)
+
+        constraints.append(G <= 10)
+        constraints.append(G >= -10)
+        prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
+        step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
+        beta_param.value = np.zeros(num_iters)
+        beta_param_sq.value = np.zeros(num_iters)
+        prob.solve(verbose=True, solver=cp.CLARABEL)
+        import pdb
+        pdb.set_trace()
         cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param], variables=[G, H])
         return cvxpylayer
 
@@ -447,6 +554,9 @@ def sigmoid_inv(beta):
 def get_x_index_subdiff(iter, k, traj=0):
     return get_x_index(traj, iter, k)
 
+def get_y_index_subdiff(iter, k, traj=0):
+    return iter + 2*(k+1) + 2
+
 def get_x_index(traj, iter, k):
     if iter == 0:
         return 0
@@ -485,3 +595,18 @@ def collect_subgrad_subdiff_indices(k, num_traj=1):
             s_list.append(get_s_index(j, k, traj)) # but for y we get the previous value
 
     return x_list, s_list
+
+def collect_nesterov_subdiff_indices(k, num_traj=1):
+    # first embed the optimal solution
+    y_list, x_list, s_list, step_size_list = [1], [1], [2], [1]
+
+    # iterate over both trajectories
+    for traj in range(num_traj):
+        for j in range(1, k+1): # we start from x_1,x_2,...,x_k (ignore x0)
+            y_list.append(get_y_index_subdiff(j, k, traj))
+            x = get_x_index_subdiff(j-1, k, traj)
+            
+            x_list.append(x)
+            s_list.append(get_s_index(j, k, traj)) # but for y we get the previous value
+
+    return y_list, x_list, s_list
