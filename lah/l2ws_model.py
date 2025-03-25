@@ -565,15 +565,16 @@ class L2WSmodel(object):
                 pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
                 # return losses.mean() + (pep_loss - 0.99650435 ** iters) ** 2
                 # return losses.mean() #+ 50 * (pep_loss - 0.13288388) ** 2 
-                return losses.mean() + 1 * (pep_loss - 0.1427964195836998 / 2) ** 2 
-            
+                # return losses.mean() + 5 * (pep_loss - 0.1427964195836998) ** 2 
+                # return losses.mean() + jnp.clip(500 * (pep_loss - 0.3), a_min=0, a_max=30)
+                return losses.mean() + 5 * (pep_loss - 0.15) ** 2
             else:
                 predict_out = batch_predict(
                     params, inputs, b, iters, z_stars, key)
                 losses = predict_out[0]
                 
                 # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:10,0]))
-                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:20,:]))
+                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
                 # pep_loss = 0
                 self.pep_penalty = pep_loss
                 return losses.mean(), predict_out
