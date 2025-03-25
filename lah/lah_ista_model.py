@@ -141,6 +141,7 @@ class LAHISTAmodel(L2WSmodel):
         # self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         
     def pep_cvxpylayer(self, params):
+        params = params.at[0,1].set(1)
         step_sizes = params[:,0]
         # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
 
@@ -527,7 +528,7 @@ class LAHISTAmodel(L2WSmodel):
         def predict(params, input, q, iters, z_star, key, factor):
             z0 = input
             params[0] = params[0].at[:,0].set(jnp.log(1 / self.smooth_param))
-            # params[0] = params[0].at[0,1].set(jnp.log(1))
+            params[0] = params[0].at[0,1].set(jnp.log(1))
             if diff_required:
                 n_iters = key #self.train_unrolls if key else 1
 
