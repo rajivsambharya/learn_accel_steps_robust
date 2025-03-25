@@ -13,6 +13,11 @@ from jax import vmap, jit
 import cvxpy as cp
 from cvxpylayers.jax import CvxpyLayer
 
+from PEPit import PEP
+from PEPit.functions import SmoothStronglyConvexFunction
+from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
+from PEPit.primitive_steps import proximal_step
+
 
 class LAHISTAmodel(L2WSmodel):
     def __init__(self, **kwargs):
@@ -139,19 +144,29 @@ class LAHISTAmodel(L2WSmodel):
         step_sizes = params[:,0]
         # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
 
-        beta = params[:,1]
-        beta_sq = beta ** 2
-        k = step_sizes.size
-        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "SCS", "verbose": True, "max_iters": 10000}) # , 
+        # beta = params[:,1]
+        # beta_sq = beta ** 2
+        # k = step_sizes.size
+        # G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
 
-        return H[-1] - H[0]
+        # return H[-1] - H[0]
+        penalty = 0
+        beta = params[:,1]
+        theta_vals = 1 / beta
+        for i in range(1, params[:,0].size):
+            lhs = (1 - theta_vals[i]) / theta_vals[i]**2
+            rhs = 1 / theta_vals[i-1]**2
+            penalty += jnp.clip(lhs - rhs, a_min=0, a_max=1000)
+        # import pdb
+        # pdb.set_trace()
+        return penalty
 
     def init_params(self):
         # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.step_varying_num)
         
         # init step-varying params
         # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
-        step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
+        step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
 
         t_params = jnp.ones(self.step_varying_num)
         t = 1
@@ -159,7 +174,8 @@ class LAHISTAmodel(L2WSmodel):
             t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
             t_params = t_params.at[i].set(t) #(jnp.log(t))
         beta_params = convert_t_to_beta(t_params)
-        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
+        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
+        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
 
         # init steady_state_params
         steady_state_params = 0 * jnp.ones((1, 2))
@@ -250,6 +266,136 @@ class LAHISTAmodel(L2WSmodel):
         prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
         cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param], variables=[G, H])
         return cvxpylayer
+    
+    def pep_clarabel(self, params):
+        num_iters = params[:,0].size
+        step_sizes = params[:,0]
+        beta_vals = params[:,1]
+        beta_sq_vals = beta_vals ** 2
+        proj = True
+        step_sizes_param = cp.Parameter(num_iters)
+        beta_param = cp.Parameter(num_iters)
+        beta_param_sq = cp.Parameter(num_iters)
+
+        k = num_iters #step_sizes.size
+        G = cp.Variable((3*(k+1)+2, 3*(k+1)+2), symmetric=True) # gram matrix
+        H = cp.Variable(k+2)
+        if not proj:
+            F = cp.Variable(k+1)
+
+        tol = 0
+        constraints = [G >> tol*np.eye(3*(k+1)+2)]
+
+        # denom
+        constraints.append(G[0, 0] - 2*G[0,1] + G[1, 1] == 1)
+        
+        # make y0 = z0
+        y_ind_start = 2*(k+1)+2
+        constraints.append(G[0, 0] - 2*G[0,y_ind_start] + G[y_ind_start, y_ind_start] == 0)
+
+        # num
+        x_k_ind = get_x_index_subdiff(k, k)
+        print('x_k_ind', x_k_ind)
+        
+        # subgradient inequalities: ∂h(x_i)^T (x_i - x_j) >= 0
+        # (y_{i-1} - x_i)^T (x_i - x_j) >= 0 -- based on triples (x_i, y_{i-1}, x_j)
+        # x_list_subgrad, s_list_subgrad = collect_subgrad_subdiff_indices(k, 1)
+        y_list, x_list, s_list = collect_nesterov_subdiff_indices(k)
+        print('y_list', y_list)
+        print('x_list', x_list)
+        print('s_list', s_list)
+        for i in range(len(x_list)):
+            y_i_ind = y_list[i]
+            x_i_ind = x_list[i]
+            s_i_ind = s_list[i]
+            if x_i_ind == 1:
+                x_i_prev_ind = x_i_ind
+                alpha_i = 1
+            elif x_i_ind == 3:
+                x_i_prev_ind = 0
+                alpha_i = step_sizes_param[0]
+            else:
+                x_i_prev_ind = x_i_ind - 1
+                alpha_i = step_sizes_param[i-1]
+            for j in range(len(y_list)):
+                y_j_ind = y_list[j]
+                if y_j_ind != y_i_ind:
+                    if proj:
+                        # constraints.append(G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
+                        constraints.append(G[x_i_ind, y_i_ind] - G[x_i_ind, y_j_ind] -G[y_i_ind, y_i_ind] +  G[y_i_ind, y_j_ind] -alpha_i*G[s_i_ind, y_i_ind] +alpha_i* G[s_i_ind, y_j_ind] >= 0)
+                    else:
+                        constraints.append((F[j] - F[i])  + G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
+                    # import pdb
+                    # pdb.set_trace()
+                    
+            # constraints.append(G[x_i_prev_ind, x_i_ind] - G[x_i_prev_ind, 0] -G[x_i_ind, x_i_ind] +  G[x_i_ind, 0] -alpha_i*G[s_i_ind, x_i_ind] +alpha_i* G[s_i_ind, 0] >= 0)
+
+
+        # x_list, x_next_list, s_list, step_size_list = collect_linear_subdiff_indices(k, [step_sizes_param]) # Q u_i = v_i for i =1, ..., len(x_list) (these are diff)
+        x_list, s_list = collect_linear_grad_indices(k)
+        print('x_list', x_list)
+        # print('x_next_list', x_next_list)
+        print('s_list', s_list)
+        # print('step_size_list', step_size_list)
+
+        # u_i^T v_j = u_j^T v_i (i neq j) where u_i = x_i i=0,...,k-1 and v_j = 1 / alpha_j (x_j - y_j)
+        for i in range(len(x_list)):
+            x_i_ind = x_list[i]
+            # x_next_i_ind = x_next_list[i]
+            s_i_ind = s_list[i]
+            # alpha_i = step_size_list[i]
+            # if i == 0:
+            #     alpha_i_sq = 1
+            # else:
+            #     alpha_i_sq = cross_alpha_ij[i-1, i-1]
+            for j in range(len(x_list)):
+                if i != j:
+                    x_j_ind = x_list[j]
+                    s_j_ind = s_list[j]
+
+                    constraints.append((H[i] - H[j]) >=  G[s_j_ind, x_i_ind] - G[s_j_ind, x_j_ind] + 1  / (2 * self.smooth_param) * (G[s_i_ind, s_i_ind] + G[s_j_ind, s_j_ind] - 2 * G[s_i_ind, s_j_ind])) 
+                    
+        for i in range(k):
+            beta_ind = i
+            x_i_ind = 3 + i
+            y_i_ind = y_ind_start + i + 1
+            y_prev_i_ind = 0 if y_i_ind == 3 else y_i_ind - 1
+            constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[beta_ind] + 2*beta_param[beta_ind] + 1)  * G[y_i_ind, y_i_ind] + beta_param_sq[beta_ind] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[beta_ind] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[beta_ind] + beta_param_sq[beta_ind]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[beta_ind] + 1) * G[x_i_ind, y_i_ind] == 0)
+            # import pdb
+            # pdb.set_trace()
+
+        # constraints.append(G <= 10)
+        # constraints.append(G >= -10)
+        prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
+        # step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
+        
+        # t_vals = np.ones(num_iters+1)
+        # t = 1
+        # for i in range(1, num_iters+1):
+        #     t = .5 * (1 + np.sqrt(1 + 4 * t ** 2))
+        #     t_vals[i] = t
+        # beta_vals = jnp.array(convert_t_to_beta(t_vals))[:10]
+        
+        beta_param.value = beta_vals #np.ones(num_iters)
+        beta_param_sq.value = (beta_param.value)**2 #np.ones(num_iters)
+        step_sizes_param.value = step_sizes
+        
+        try:
+            prob.solve(verbose=True, solver=cp.CLARABEL)
+            return prob.value
+        except Exception as e:
+            print('exception clarabel', e)
+            return 0
+            
+        # import pdb
+        # pdb.set_trace()
+        # cvxpylayer = CvxpyLayer(prob, parameters=[step_sizes_param, beta_param, beta_param_sq], variables=[G, H])
+        
+        # step_sizes = jnp.ones(num_iters) / jnp.array(self.smooth_param)
+        # G, H = cvxpylayer(step_sizes, beta_vals, beta_vals ** 2, solver_args={"solve_method": "CLARABEL", "verbose": True})
+        # import pdb
+        # pdb.set_trace()
+        
     
     def create_nesterov_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
         """
@@ -347,8 +493,8 @@ class LAHISTAmodel(L2WSmodel):
             # import pdb
             # pdb.set_trace()
 
-        constraints.append(G <= 1)
-        constraints.append(G >= -1)
+        # constraints.append(G <= 1)
+        # constraints.append(G >= -1)
         prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
         step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
         
@@ -380,6 +526,8 @@ class LAHISTAmodel(L2WSmodel):
         @partial(jit, static_argnames=['iters', 'key'])
         def predict(params, input, q, iters, z_star, key, factor):
             z0 = input
+            params[0] = params[0].at[:,0].set(jnp.log(1 / self.smooth_param))
+            # params[0] = params[0].at[0,1].set(jnp.log(1))
             if diff_required:
                 n_iters = key #self.train_unrolls if key else 1
 
@@ -437,6 +585,7 @@ class LAHISTAmodel(L2WSmodel):
                 if diff_required:
                     z_final, iter_losses = train_fn(k=iters,
                                                     z0=z0,
+                                                    y0=z0,
                                                     q=q,
                                                     params=stochastic_params,
                                                     supervised=supervised,
@@ -465,6 +614,75 @@ class LAHISTAmodel(L2WSmodel):
                 return return_out
         loss_fn = self.predict_2_loss(predict, diff_required)
         return loss_fn
+    
+        
+    def pepit_nesterov_check(self, params):
+        num_iters = params[:,0].size
+        step_sizes = params[:,0]
+        beta_vals = params[:,1]
+        
+        # Instantiate PEP
+        problem = PEP()
+        mu = 0
+        L = self.smooth_param._value
+
+        # Declare a strongly convex smooth function and a convex function
+        f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
+        h = problem.declare_function(ConvexIndicatorFunction)
+        # h = problem.declare_function(ConvexFunction)
+        F = f + h
+
+        # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
+        xs = F.stationary_point()
+        Fs = F(xs)
+
+        # Then define the starting point x0
+        x0 = problem.set_initial_point()
+
+        # Set the initial constraint that is the distance between x0 and x^*
+        problem.set_initial_condition((x0 - xs) ** 2 <= 1)
+
+        # Compute n steps of the accelerated proximal gradient method starting from x0
+        x_new = x0
+        y = x0
+        for i in range(num_iters):
+            x_old = x_new
+            x_new, _, hx_new = proximal_step(y - step_sizes[i] * f.gradient(y), h, step_sizes[i])
+            y = x_new + beta_vals[i] * (x_new - x_old)
+
+        # Set the performance metric to the function value accuracy
+        problem.set_performance_metric((f(x_new) + hx_new) - Fs)
+        
+        # import pdb
+        # pdb.set_trace()
+
+        # Solve the PEP
+        verbose = 1
+        pepit_verbose = max(verbose, 0)
+        try:
+            pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.CLARABEL)
+        except Exception as e:
+            print('exception', e)
+            pepit_tau = 0
+
+        # Compute theoretical guarantee (for comparison)
+        n = num_iters
+        if mu == 0:
+            theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # tight, see [2], Table 1 (column 1, line 1)
+        else:
+            theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # not tight (bound for smooth convex functions)
+            # print('Warning: momentum is tuned for non-strongly convex functions.')
+
+        # Print conclusion if required
+        verbose = 1
+        if verbose != -1:
+            print('*** Example file:'
+                ' worst-case performance of the Accelerated Proximal Gradient Method in function values***')
+            print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
+            print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
+
+        # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
+        return pepit_tau, theoretical_tau
 
     def calculate_total_penalty(self, N_train, params, c, b, delta):
         return 0
@@ -644,3 +862,4 @@ def convert_t_to_beta(t_vals):
     # import pdb
     # pdb.set_trace()
     return beta_vals
+
