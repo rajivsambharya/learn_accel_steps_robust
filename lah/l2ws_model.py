@@ -567,7 +567,8 @@ class L2WSmodel(object):
                 # return losses.mean() #+ 50 * (pep_loss - 0.13288388) ** 2 
                 # return losses.mean() + 5 * (pep_loss - 0.1427964195836998) ** 2 
                 # return losses.mean() + jnp.clip(500 * (pep_loss - 0.3), a_min=0, a_max=30)
-                return losses.mean() + 5 * (pep_loss - 0.15) ** 2
+                # return losses.mean() + 5 * (pep_loss - 0.15) ** 2
+                return losses.mean() + 5 * (pep_loss - 0.3) ** 2
             else:
                 predict_out = batch_predict(
                     params, inputs, b, iters, z_stars, key)
