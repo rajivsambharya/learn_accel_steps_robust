@@ -141,23 +141,23 @@ class LAHISTAmodel(L2WSmodel):
         # self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         
     def pep_cvxpylayer(self, params):
-        params = params.at[0,1].set(1)
+        # params = params.at[0,1].set(1)
         step_sizes = params[:,0]
         # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
 
-        # beta = params[:,1]
-        # beta_sq = beta ** 2
-        # k = step_sizes.size
-        # G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
-
-        # return H[-1] - H[0]
-        penalty = 0
         beta = params[:,1]
-        theta_vals = 1 / beta
-        for i in range(1, params[:,0].size):
-            lhs = (1 - theta_vals[i]) / theta_vals[i]**2
-            rhs = 1 / theta_vals[i-1]**2
-            penalty += jnp.clip(lhs - rhs, a_min=0, a_max=1000)
+        beta_sq = beta ** 2
+        k = step_sizes.size
+        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
+
+        return H[-1] - H[0]
+        # penalty = 0
+        # beta = params[:,1]
+        # theta_vals = 1 / beta
+        # for i in range(1, params[:,0].size):
+        #     lhs = (1 - theta_vals[i]) / theta_vals[i]**2
+        #     rhs = 1 / theta_vals[i-1]**2
+        #     penalty += jnp.clip(lhs - rhs, a_min=0, a_max=1000)
         # import pdb
         # pdb.set_trace()
         return penalty
@@ -168,6 +168,8 @@ class LAHISTAmodel(L2WSmodel):
         # init step-varying params
         # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
         step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
+        # step_varying_params = step_varying_params.at[0,0].set(jnp.log(1.1 / self.smooth_param))
+        # step_varying_params = step_varying_params.at[1,0].set(jnp.log(1.5 / self.smooth_param))
 
         t_params = jnp.ones(self.step_varying_num)
         t = 1
@@ -175,8 +177,9 @@ class LAHISTAmodel(L2WSmodel):
             t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
             t_params = t_params.at[i].set(t) #(jnp.log(t))
         beta_params = convert_t_to_beta(t_params)
-        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
-        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
+        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
+        step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
+        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
 
         # init steady_state_params
         steady_state_params = 0 * jnp.ones((1, 2))
@@ -527,8 +530,8 @@ class LAHISTAmodel(L2WSmodel):
         @partial(jit, static_argnames=['iters', 'key'])
         def predict(params, input, q, iters, z_star, key, factor):
             z0 = input
-            params[0] = params[0].at[:,0].set(jnp.log(1 / self.smooth_param))
-            params[0] = params[0].at[0,1].set(jnp.log(1))
+            
+            # params[0] = params[0].at[0,1].set(jnp.log(1))
             if diff_required:
                 n_iters = key #self.train_unrolls if key else 1
 
@@ -562,8 +565,6 @@ class LAHISTAmodel(L2WSmodel):
 
             # stochastic_params = params[0][:n_iters, 0]
             if special_algo == 'nesterov':
-                import pdb
-                pdb.set_trace()
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
@@ -661,7 +662,7 @@ class LAHISTAmodel(L2WSmodel):
         verbose = 1
         pepit_verbose = max(verbose, 0)
         try:
-            pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.CLARABEL)
+            pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
         except Exception as e:
             print('exception', e)
             pepit_tau = 0

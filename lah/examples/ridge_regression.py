@@ -41,7 +41,7 @@ def run(run_cfg, lah=True):
     static_flag = True
     if lah:
         # algo = 'lah_stochastic_gd'
-        algo = 'lah_gd'
+        algo = 'lah_accel_gd'
     else:
         algo = 'lm_gd'
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)

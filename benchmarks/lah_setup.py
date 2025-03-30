@@ -2,27 +2,12 @@ import sys
 
 import hydra
 
-import lah.examples.jamming as jamming
 import lah.examples.lasso as lasso
-import lah.examples.markowitz as markowitz
 import lah.examples.maxcut as maxcut
 import lah.examples.mnist as mnist
-import lah.examples.mpc as mpc
-import lah.examples.mri as mri
-import lah.examples.osc_mass as osc_mass
-import lah.examples.phase_retrieval as phase_retrieval
-import lah.examples.quadcopter as quadcopter
 import lah.examples.robust_kalman as robust_kalman
-import lah.examples.robust_ls as robust_ls
-import lah.examples.robust_pca as robust_pca
-import lah.examples.sine as sine
-import lah.examples.sparse_coding as sparse_coding
-import lah.examples.sparse_pca as sparse_pca
-import lah.examples.unconstrained_qp as unconstrained_qp
-import lah.examples.vehicle as vehicle
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
-import lah.examples.opf as opf
 
 
 @hydra.main(config_path='configs/markowitz', config_name='markowitz_setup.yaml')

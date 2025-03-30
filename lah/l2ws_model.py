@@ -557,18 +557,23 @@ class L2WSmodel(object):
         # @partial(jit, static_argnums=(3, 5,))
         @partial(jit, static_argnames=['iters', 'key'])
         def loss_fn(params, inputs, b, iters, z_stars, key):
+            # import pdb
+            # pdb.set_trace()
+            # mean_step_size = jnp.mean(jnp.exp(params[0][:,0]))
+            # params[0] = params[0].at[:,0].set(jnp.log(jnp.exp(params[0][:,0]) - mean_step_size + 1 / self.smooth_param))
+            
             if diff_required:
                 losses = batch_predict(params, inputs, b, iters, z_stars, key)
                 
                 # update so that we have pep
                 # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:,0]))
-                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
+                # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
                 # return losses.mean() + (pep_loss - 0.99650435 ** iters) ** 2
                 # return losses.mean() #+ 50 * (pep_loss - 0.13288388) ** 2 
                 # return losses.mean() + 5 * (pep_loss - 0.1427964195836998) ** 2 
                 # return losses.mean() + jnp.clip(500 * (pep_loss - 0.3), a_min=0, a_max=30)
                 # return losses.mean() + 5 * (pep_loss - 0.15) ** 2
-                return losses.mean() + pep_loss ** 2 #+ 5 * (pep_loss - 0.3) ** 2
+                return losses.mean() #+ pep_loss ** 2 #+ 5 * (pep_loss - 0.3) ** 2
             else:
                 predict_out = batch_predict(
                     params, inputs, b, iters, z_stars, key)
@@ -577,11 +582,12 @@ class L2WSmodel(object):
                 # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:10,0]))
                 # import pdb
                 # pdb.set_trace()
-                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
+                # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
                 # pep_loss2 = self.pep_clarabel(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
                 # pep_loss3  = self.pepit_nesterov_check(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
+                # print('PEPLOSS3', pep_loss3)
                 
-                # pep_loss = 0
+                pep_loss = 0
                 self.pep_penalty = pep_loss
                 # import pdb
                 # pdb.set_trace()

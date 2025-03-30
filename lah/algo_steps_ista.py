@@ -318,7 +318,7 @@ def k_steps_train_lah_fista(k, z0, y0, q, params, lambd, A, supervised, z_star, 
 def fp_train_lah_fista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     z, y, t, loss_vec = val
     # z_next = fixed_point_fista(z, A, c, lambd, ista_steps[i])
-    z_next, y_next, t_next = fixed_point_fista(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
+    z_next, y_next, t_next = fixed_point_fista_beta(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
     diff = jnp.linalg.norm(z_next - z_star) ** 2
     loss_vec = loss_vec.at[i].set(diff)
     return z_next, y_next, t_next, loss_vec
@@ -352,7 +352,7 @@ def k_steps_eval_lah_fista(k, z0, q, params, lambd, A, supervised, z_star, jit):
 
 def fp_eval_lah_fista(i, val, supervised, z_star, A, c, lambd, ista_steps):
     z, y, t, loss_vec, obj_diffs, z_all = val
-    z_next, y_next, t_next = fixed_point_fista(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
+    z_next, y_next, t_next = fixed_point_fista_beta(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
     if supervised:
         # diff = 10 * jnp.log10(jnp.linalg.norm(z - z_star) ** 2 / jnp.linalg.norm(z_star) ** 2)
         diff = jnp.linalg.norm(z - z_star)

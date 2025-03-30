@@ -22,6 +22,8 @@ from lah.logisticgd_model import LOGISTICGDmodel
 from lah.lm_logisticgd_model import LMLOGISTICGDmodel
 from lah.lm_ista_model import LMISTAmodel
 from lah.lah_gd_model import LAHGDmodel
+from lah.lah_gd_accel_model import LAHAccelGDmodel
+from lah.lah_logisticgd_accel_model import LAHAccelLOGISTICGDmodel
 from lah.lah_stoch_gd_model import LAHStochasticGDmodel
 from lah.lah_logisticgd_model import LAHLOGISTICGDmodel
 from lah.lah_ista_model import LAHISTAmodel
@@ -182,6 +184,8 @@ class Workspace:
             self.create_lah_stochastic_gd_model(cfg, static_dict)
         elif algo == 'lah_logisticgd':
             self.create_lah_logisticgd_model(cfg, static_dict)
+        elif algo == 'lah_accel_logisticgd':
+            self.create_lah_accel_logistic_model(cfg, static_dict)
         elif algo == 'lm_logisticgd':
             self.create_lm_logisticgd_model(cfg, static_dict)
         elif algo == 'logisticgd':
@@ -200,6 +204,8 @@ class Workspace:
             self.create_lm_ista_model(cfg, static_dict)
         elif algo == 'lm_osqp':
             self.create_lm_osqp_model(cfg, static_dict)
+        elif algo == 'lah_accel_gd':
+            self.create_lah_accel_gd_model(cfg, static_dict)
         
     def create_ista_model(self, cfg, static_dict):
         # get A, lambd, ista_step
@@ -267,6 +273,51 @@ class Workspace:
                           P=P
                           )
         self.l2ws_model = LAHGDmodel(train_unrolls=self.train_unrolls,
+                                       eval_unrolls=self.eval_unrolls,
+                                       train_inputs=self.train_inputs,
+                                       test_inputs=self.test_inputs,
+                                       regression=cfg.supervised,
+                                       nn_cfg=cfg.nn_cfg,
+                                       z_stars_train=self.z_stars_train,
+                                       z_stars_test=self.z_stars_test,
+                                       loss_method=cfg.loss_method,
+                                       algo_dict=input_dict)
+        
+    def create_lah_accel_gd_model(self, cfg, static_dict):
+        # get A, lambd, ista_step
+        P = static_dict['P']
+        gd_step = static_dict['gd_step']
+
+        input_dict = dict(algorithm='lah_accel_gd',
+                          c_mat_train=self.q_mat_train,
+                          c_mat_test=self.q_mat_test,
+                          gd_step=gd_step,
+                          P=P
+                          )
+        self.l2ws_model = LAHAccelGDmodel(train_unrolls=self.train_unrolls,
+                                       eval_unrolls=self.eval_unrolls,
+                                       train_inputs=self.train_inputs,
+                                       test_inputs=self.test_inputs,
+                                       regression=cfg.supervised,
+                                       nn_cfg=cfg.nn_cfg,
+                                       z_stars_train=self.z_stars_train,
+                                       z_stars_test=self.z_stars_test,
+                                       loss_method=cfg.loss_method,
+                                       algo_dict=input_dict)
+        
+    def create_lah_accel_logistic_model(self, cfg, static_dict):
+        # get A, lambd, ista_step
+        num_points = static_dict['num_points']
+        gd_step = static_dict['gd_step']
+
+        input_dict = dict(algorithm='lah_logisticgd',
+                          q_mat_train=self.q_mat_train,
+                          q_mat_test=self.q_mat_test,
+                          gd_step=gd_step,
+                          num_points=num_points
+                          )
+        self.l2ws_model = LAHAccelLOGISTICGDmodel(train_unrolls=self.train_unrolls,
+                                               step_varying_num=cfg.get('step_varying_num', 50),
                                        eval_unrolls=self.eval_unrolls,
                                        train_inputs=self.train_inputs,
                                        test_inputs=self.test_inputs,
@@ -1255,6 +1306,14 @@ class Workspace:
 
 
     def eval_iters_train_and_test(self, col, new_start_index):
+        try:
+            pep_loss2 = self.l2ws_model.pep_clarabel(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
+            pep_loss3  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
+            print('PEPLOSS2', pep_loss2)
+            print('PEPLOSS3', pep_loss3)
+        except Exception as e:
+            print('excpetion', e)
+        
         self.evaluate_iters(
             self.num_samples_test, col, train=False)
         out_train = self.evaluate_iters(

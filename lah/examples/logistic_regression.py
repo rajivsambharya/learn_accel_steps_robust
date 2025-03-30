@@ -9,6 +9,7 @@ import hydra
 import gzip
 import time
 import matplotlib.pyplot as plt
+from emnist import extract_training_samples
 
 
 def run(run_cfg, model='lah'):
@@ -39,7 +40,7 @@ def run(run_cfg, model='lah'):
     # we directly save q now
     static_flag = True
     if model == 'lah':
-        algo = 'lah_logisticgd'
+        algo = 'lah_accel_logisticgd' #'lah_logisticgd' #'lah_accel_logisticgd'
     elif model == 'l2ws':
         algo = 'logisticgd'
     else:
@@ -198,8 +199,8 @@ def get_mnist(emnist=True):
         # Load MNIST dataset
         # x_train, y_train = load_mnist('mnist_data', kind='train')
         # x_test, y_test = load_mnist('mnist_data', kind='t10k')
-        x_train, y_train = load_mnist(f"{orig_cwd}/examples/mnist_data", kind='train')
-        x_test, y_test = load_mnist(f"{orig_cwd}/examples/mnist_data", kind='t10k')
+        x_train, y_train = load_mnist(f"{orig_cwd}/lah/examples/mnist_data", kind='train')
+        x_test, y_test = load_mnist(f"{orig_cwd}/lah/examples/mnist_data", kind='test') #kind='t10k')
 
         # Normalize pixel values
         x_train = x_train.astype('float32') / 255
@@ -208,8 +209,8 @@ def get_mnist(emnist=True):
 
 def load_mnist(path, kind='train'):
     """Load MNIST data from `path`"""
-    labels_path = os.path.join(path, '%s-labels-idx1-ubyte.gz' % kind)
-    images_path = os.path.join(path, '%s-images-idx3-ubyte.gz' % kind)
+    labels_path = os.path.join(path, 'emnist-digits-%s-labels-idx1-ubyte.gz' % kind)
+    images_path = os.path.join(path, 'emnist-digits-%s-images-idx3-ubyte.gz' % kind)
 
     with gzip.open(labels_path, 'rb') as lbpath:
         labels = np.frombuffer(lbpath.read(), dtype=np.uint8, offset=8)

@@ -811,8 +811,8 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
     plt.xlabel('iterations')
     plt.title('objective suboptimality')
 
-    if example == 'logistic_regression':
-        plt.xscale('log')
+    # if example == 'logistic_regression':
+    #     plt.xscale('log')
 
     # plt.ylabel('objective suboptimality')
     # axes[1].set_ylabel('gain to vanilla')

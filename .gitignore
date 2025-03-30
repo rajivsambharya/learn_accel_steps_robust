@@ -175,3 +175,4 @@ cython_debug/
 .DS_Store
 outputs/
 kl_inv_cache/
+lah/examples/mnist_data/
