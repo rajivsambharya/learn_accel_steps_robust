@@ -454,7 +454,7 @@ def fixed_point_lah_nesterov_logisticgd(z, v, t, X, y, gd_step, beta):
 
 def fp_eval_lah_nesterov_logistic(i, val, supervised, z_star, X, y_label, gd_steps, betas):
     z, y, t, loss_vec, z_all, obj_diffs = val
-    z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=.999)) #beta_vals = np.clip(params[:,1], a_min=0, a_max=0.999)
+    z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=100)) #beta_vals = np.clip(params[:,1], a_min=0, a_max=0.999)
     if supervised:
         diff = jnp.linalg.norm(z - z_star)
     else:
@@ -477,7 +477,7 @@ def fp_eval_lah_nesterov_logistic(i, val, supervised, z_star, X, y_label, gd_ste
 
 def fp_train_lah_nesterov_logistic(i, val, supervised, z_star, X, y_label, gd_steps, betas):
     z, y, t, loss_vec = val
-    z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=.999))
+    z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=100))
     diff = jnp.linalg.norm(z_next - z_star)
     loss_vec = loss_vec.at[i].set(diff)
     return z_next, y_next, t_next, loss_vec

@@ -121,6 +121,7 @@ class LAHAccelGDmodel(L2WSmodel):
     def compute_gradients(self, batch_inputs, batch_q_data):
         gradients = (self.P @ batch_inputs.T + batch_q_data.T).T
         return gradients
+    
 
 
     def init_params(self):

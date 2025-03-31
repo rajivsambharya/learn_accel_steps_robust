@@ -1307,9 +1307,9 @@ class Workspace:
 
     def eval_iters_train_and_test(self, col, new_start_index):
         try:
-            pep_loss2 = self.l2ws_model.pep_clarabel(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
+            # pep_loss2 = self.l2ws_model.pep_clarabel(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
             pep_loss3  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
-            print('PEPLOSS2', pep_loss2)
+            # print('PEPLOSS2', pep_loss2)
             print('PEPLOSS3', pep_loss3)
         except Exception as e:
             print('excpetion', e)

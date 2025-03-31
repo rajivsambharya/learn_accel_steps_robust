@@ -13,6 +13,8 @@ from PEPit.functions import SmoothStronglyConvexFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.primitive_steps import proximal_step
 import cvxpy as cp
+from cvxpylayers.jax import CvxpyLayer
+from jax import lax
 
 
 class LAHAccelLOGISTICGDmodel(L2WSmodel):
@@ -78,9 +80,9 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         self.num_const_steps = input_dict.get('num_const_steps', 1)
 
         self.num_points = num_points
+        
+        self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
 
-        if self.train_unrolls == 1:
-            self.train_case = 'one_step_grad'
 
     def compute_single_gradient(self, z, q):
         num_points = self.num_points
@@ -282,6 +284,19 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         # sigmoid_inv(beta)
+        
+    def pep_cvxpylayer(self, params):
+        # params = params.at[0,1].set(1)
+        step_sizes = params[:,0]
+
+        beta = params[:,1]
+        # beta_sq = beta ** 2
+        k = step_sizes.size
+        
+        A_param = build_A_matrix_with_yk_and_xstar(step_sizes, beta)
+        G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
+
+        return H[-3] - H[-1]
 
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required, special_algo='gd'):
@@ -372,6 +387,87 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         loss_fn = self.predict_2_loss(predict, diff_required)
         return loss_fn
     
+    
+    def create_nesterov_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
+        """
+        ordering: x*, x_0,...,x_{p-1}, s*,s_0,..,s_{p-1}
+        """
+
+        k = num_iters
+        A = cp.Parameter((k+3, k+3))
+        L = self.smooth_param
+        
+        # Define Gram matrix G and function values F
+        G = cp.Variable((k + 3, k + 3), PSD=True)  # Gram of [x0, x*, g0, ..., g_{k-1}, g_f]
+        F = cp.Variable(k + 3)  # f(x_0), ..., f(x_k), f(y_k), f(x_*)
+
+        constraints = []
+
+        # Interpolation constraints: for i,j in {0, ..., k}, plus g_f
+        for i in range(k + 3):  # includes x_0,...,x_k, y_k, x^*
+            for j in range(k + 3):
+                if i != j:
+                    Ai = A[i]
+                    Aj = A[j]
+
+                    # Determine gradient indices
+                    def grad_idx(idx):
+                        if idx <= k: # - 1:
+                            return 2 + idx         # g_0 to g_{k-1}
+                        elif idx == k + 1: #idx == k or idx == k + 1:
+                            return 2 + k           # g_f (for x_k and y_k)
+                        else:  # x^* has zero gradient
+                            return None
+
+                    gi_idx = grad_idx(i)
+                    gj_idx = grad_idx(j)
+
+                    # Gradient terms
+                    if gi_idx is None and gj_idx is None:
+                        continue  # both gradients zero → vacuous
+
+                    # <g_j, x_i - x_j>
+                    if gj_idx is not None:
+                        delta_x = Ai - Aj
+                        g_j_dot_delta_x = cp.sum(cp.multiply(delta_x, G[gj_idx, :]))
+                    else:
+                        g_j_dot_delta_x = 0.0
+
+                    # ||g_i - g_j||^2
+                    if gi_idx is None:
+                        grad_diff_norm_sq = G[gj_idx, gj_idx]
+                    elif gj_idx is None:
+                        grad_diff_norm_sq = G[gi_idx, gi_idx]
+                    else:
+                        grad_diff_norm_sq = (
+                            G[gi_idx, gi_idx]
+                            - 2 * G[gi_idx, gj_idx]
+                            + G[gj_idx, gj_idx]
+                        )
+
+                    # Interpolation inequality
+                    constraints.append(
+                        F[i] >= F[j] + g_j_dot_delta_x + (1 / (2 * L)) * grad_diff_norm_sq
+                    )
+
+        # Optional: normalize ||x_0 - x^*||^2 = 1
+        constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
+
+        # Objective: maximize worst-case f(x_k) - f(x^*)
+        objective = cp.Maximize(F[-3] - F[-1])  # A[-1] is x^*
+        prob = cp.Problem(objective, constraints)
+        
+        cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
+        
+        # beta_list = jnp.array([i / (i+3) for i in range(num_iters)])
+        # import pdb
+        # pdb.set_trace()
+        
+        # A_val = build_A_matrix_with_yk_and_xstar(jnp.ones(num_iters) / self.smooth_param, beta_list)
+        # out = cvxpylayer(A_val, solver_args={"solve_method": "CLARABEL", "verbose": True})
+        
+        return cvxpylayer
+    
     def pep_clarabel(self, params):
         alpha_list = params[:,0]
         beta_list = params[:,1]
@@ -379,7 +475,9 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         L = self.smooth_param
 
         # Build coefficient matrix A: rows for x_0,...,x_k, y_k, x_star
-        A = build_A_matrix_with_yk_and_xstar(alpha_list, beta_list)
+        A = cp.Parameter((k+3, k+3))
+        A_val = build_A_matrix_with_yk_and_xstar(alpha_list, beta_list)
+        
 
         # Define Gram matrix G and function values F
         G = cp.Variable((k + 3, k + 3), PSD=True)  # Gram of [x0, x*, g0, ..., g_{k-1}, g_f]
@@ -440,6 +538,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         # Objective: maximize worst-case f(x_k) - f(x^*)
         objective = cp.Maximize(F[-3] - F[-1])  # A[-1] is x^*
 
+        A.value = A_val
         prob = cp.Problem(objective, constraints)
         prob.solve(verbose=True, solver=cp.MOSEK)
 
@@ -449,7 +548,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
     def pepit_nesterov_check(self, params):
         num_iters = params[:,0].size
         step_sizes = params[:,0]
-        beta_vals = np.clip(params[:,1], a_min=0, a_max=.999)
+        beta_vals = np.clip(params[:,1], a_min=0, a_max=100)
         
         # Instantiate PEP
         problem = PEP()
@@ -544,56 +643,104 @@ def convert_t_to_beta(t_vals):
     return beta_vals
 
 
+# def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
+#     """
+#     Returns A matrix of shape (k+3, k+3), where:
+#     - A[0] to A[k] represent x_0 to x_k
+#     - A[k+1] represents y_k
+#     - A[k+2] represents x_star
+
+#     Basis: [x_0, x_star, g_0, ..., g_{k-1}, g_f]
+#     """
+#     k = len(alpha_list)
+#     assert len(beta_list) == k, "Length of beta_list must match alpha_list"
+
+#     A = np.zeros((k + 3, k + 3))  # Rows: x_0 to x_k, y_k, x_star
+#     idx_x0 = 0
+#     idx_xstar = 1
+#     idx_g = lambda t: 2 + t
+#     idx_gf = 2 + k  # g_f = ∇f(y_k)
+
+#     # x_0 = [1, 0, 0, ..., 0]
+#     A[0, idx_x0] = 1.0
+
+#     # Build x_1 to x_k
+#     for i in range(k):
+#         # Construct y_i = x_i + β_i (x_i - x_{i-1})
+#         x_i = A[i]
+#         x_im1 = A[i - 1] if i > 0 else A[0]
+
+#         y_i = x_i.copy()
+#         y_i[idx_g(i)] -= alpha_list[i]
+#         y_im1 = x_im1.copy()
+#         if i == 0:
+#             y_im1[idx_g(i)] -= alpha_list[i]
+#         else:
+#             y_im1[idx_g(i-1)] -= alpha_list[i-1]
+
+#         # A[i + 1] = x_ip1  # Store x_{i+1}
+#         A[i + 1] = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
+
+#     # Final extrapolated point: y_k = x_k + β_k (x_k - x_{k-1})
+#     x_k = A[k]
+#     x_km1 = A[k - 1] if k >= 1 else A[0]
+#     beta_k = beta_list[k - 1]
+#     y_k = (1 + beta_k) * x_k - beta_k * x_km1
+#     A[k + 1] = y_k  # Store y_k
+
+#     # x_star
+#     A[k + 2, idx_xstar] = 1.0
+
+#     return A
+
+
 def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
     """
-    Returns A matrix of shape (k+3, k+3), where:
-    - A[0] to A[k] represent x_0 to x_k
-    - A[k+1] represents y_k
-    - A[k+2] represents x_star
+    JAX-friendly version of build_A_matrix_with_yk_and_xstar.
+
+    Returns A: jnp.ndarray of shape (k+3, k+3), where rows are:
+    - A[0] to A[k]: x_0 to x_k
+    - A[k+1]: y_k
+    - A[k+2]: x_star
 
     Basis: [x_0, x_star, g_0, ..., g_{k-1}, g_f]
     """
-    k = len(alpha_list)
-    assert len(beta_list) == k, "Length of beta_list must match alpha_list"
+    k = alpha_list.shape[0]
+    n_basis = k + 3  # [x0, x*, g_0, ..., g_{k-1}, g_f]
+    A0 = jnp.zeros((k + 3, n_basis))
 
-    A = np.zeros((k + 3, k + 3))  # Rows: x_0 to x_k, y_k, x_star
     idx_x0 = 0
     idx_xstar = 1
     idx_g = lambda t: 2 + t
-    idx_gf = 2 + k  # g_f = ∇f(y_k)
+    idx_gf = 2 + k
 
-    # x_0 = [1, 0, 0, ..., 0]
-    A[0, idx_x0] = 1.0
+    # Initialize A[0] = x0
+    A0 = A0.at[0, idx_x0].set(1.0)
 
-    # Build x_1 to x_k
-    for i in range(k):
-        # Construct y_i = x_i + β_i (x_i - x_{i-1})
+    def body(i, A):
         x_i = A[i]
         x_im1 = A[i - 1] if i > 0 else A[0]
-        # y_i = (1 + beta_list[i]) * x_i - beta_list[i] * x_im1
 
-        # x_{i+1} = y_i - α_i ∇f(y_i)
-        # x_ip1 = y_i.copy()
-        # x_ip1[idx_g(i)] -= alpha_list[i]
-        y_i = x_i.copy()
-        y_i[idx_g(i)] -= alpha_list[i]
-        y_im1 = x_im1.copy()
+        # Build y_i and y_{i-1}
+        y_i = x_i.at[idx_g(i)].add(-alpha_list[i])
         if i == 0:
-            y_im1[idx_g(i)] -= alpha_list[i]
+            y_im1 = x_im1.at[idx_g(i)].add(-alpha_list[i])
         else:
-            y_im1[idx_g(i-1)] -= alpha_list[i-1]
+            y_im1 = x_im1.at[idx_g(i - 1)].add(-alpha_list[i - 1])
 
-        # A[i + 1] = x_ip1  # Store x_{i+1}
-        A[i + 1] = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
+        x_ip1 = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
+        return A.at[i + 1].set(x_ip1)
 
-    # Final extrapolated point: y_k = x_k + β_k (x_k - x_{k-1})
+    A = lax.fori_loop(0, k, body, A0)
+
+    # y_k = (1 + beta_k) * x_k - beta_k * x_{k-1}
     x_k = A[k]
     x_km1 = A[k - 1] if k >= 1 else A[0]
     beta_k = beta_list[k - 1]
     y_k = (1 + beta_k) * x_k - beta_k * x_km1
-    A[k + 1] = y_k  # Store y_k
+    A = A.at[k + 1].set(y_k)
 
     # x_star
-    A[k + 2, idx_xstar] = 1.0
+    A = A.at[k + 2, idx_xstar].set(1.0)
 
     return A
