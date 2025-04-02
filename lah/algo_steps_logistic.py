@@ -86,13 +86,14 @@ def k_steps_eval_lah_logisticgd(k, z0, q, params, num_points, safeguard_step, su
         obj_diffs = jnp.zeros(k)
         safeguard = False
         prev_obj = 1e10
-        val = z0, iter_losses, z_all, obj_diffs, safeguard, prev_obj
+        val = z0, iter_losses, z_all, obj_diffs #, safeguard, prev_obj
         start_iter = 0
         if jit:
             out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
         else:
             out = python_fori_loop(start_iter, k, fp_eval_partial, val)
-        z_final, iter_losses, z_all, obj_diffs, safeguard, prev_obj = out
+        # z_final, iter_losses, z_all, obj_diffs, safeguard, prev_obj = out
+        z_final, iter_losses, z_all, obj_diffs = out
         z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 

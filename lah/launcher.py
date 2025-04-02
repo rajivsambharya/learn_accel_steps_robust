@@ -26,6 +26,7 @@ from lah.lah_gd_accel_model import LAHAccelGDmodel
 from lah.lah_logisticgd_accel_model import LAHAccelLOGISTICGDmodel
 from lah.lah_stoch_gd_model import LAHStochasticGDmodel
 from lah.lah_logisticgd_model import LAHLOGISTICGDmodel
+from lah.lah_scs_accel_model import LAHAccelSCSmodel
 from lah.lah_ista_model import LAHISTAmodel
 from lah.lah_osqp_model import LAHOSQPmodel
 from lah.lah_scs_model import LAHSCSmodel
@@ -206,6 +207,10 @@ class Workspace:
             self.create_lm_osqp_model(cfg, static_dict)
         elif algo == 'lah_accel_gd':
             self.create_lah_accel_gd_model(cfg, static_dict)
+        elif algo == 'lah_accel_scs':
+            self.create_lah_accel_scs_model(cfg, static_dict)
+        
+        
         
     def create_ista_model(self, cfg, static_dict):
         # get A, lambd, ista_step
@@ -294,6 +299,7 @@ class Workspace:
                           gd_step=gd_step,
                           P=P
                           )
+        
         self.l2ws_model = LAHAccelGDmodel(train_unrolls=self.train_unrolls,
                                        eval_unrolls=self.eval_unrolls,
                                        train_inputs=self.train_inputs,
@@ -310,7 +316,7 @@ class Workspace:
         num_points = static_dict['num_points']
         gd_step = static_dict['gd_step']
 
-        input_dict = dict(algorithm='lah_logisticgd',
+        input_dict = dict(algorithm='lah_accel_logisticgd',
                           q_mat_train=self.q_mat_train,
                           q_mat_test=self.q_mat_test,
                           gd_step=gd_step,
@@ -323,6 +329,8 @@ class Workspace:
                                        test_inputs=self.test_inputs,
                                        regression=cfg.supervised,
                                        nn_cfg=cfg.nn_cfg,
+                                       pep_regularizer_coeff=cfg.get('pep_regularizer_coeff', None),
+                                       pep_target=cfg.get('pep_target', None),
                                        z_stars_train=self.z_stars_train,
                                        z_stars_test=self.z_stars_test,
                                        loss_method=cfg.loss_method,
@@ -617,6 +625,47 @@ class Workspace:
                                         loss_method=cfg.loss_method,
                                         algo_dict=algo_dict)
         
+    def create_lah_accel_scs_model(self, cfg, static_dict):
+        static_M = static_dict['M']
+
+        # save cones
+        self.cones = static_dict['cones_dict']
+
+        self.M = static_M
+        proj = create_projection_fn(self.cones, self.n)
+
+        psd_sizes = get_psd_sizes(self.cones)
+
+        self.psd_size = psd_sizes[0]
+
+        algo_dict = {'proj': proj,
+                     'q_mat_train': self.q_mat_train,
+                     'q_mat_test': self.q_mat_test,
+                     'm': self.m,
+                     'n': self.n,
+                     'static_M': static_M,
+                     'num_const_steps': cfg.num_const_steps,
+                     'static_flag': self.static_flag,
+                     'cones': self.cones,
+                     'lightweight': cfg.get('lightweight', False),
+                     'custom_loss': self.custom_loss
+                     }
+        self.l2ws_model = LAHAccelSCSmodel(train_unrolls=self.train_unrolls,
+                                        eval_unrolls=self.eval_unrolls,
+                                        train_inputs=self.train_inputs,
+                                        test_inputs=self.test_inputs,
+                                        z_stars_train=self.z_stars_train,
+                                        z_stars_test=self.z_stars_test,
+                                        x_stars_train=self.x_stars_train,
+                                        x_stars_test=self.x_stars_test,
+                                        y_stars_train=self.y_stars_train,
+                                        y_stars_test=self.y_stars_test,
+                                        regression=cfg.get(
+                                            'supervised', False),
+                                        nn_cfg=cfg.nn_cfg,
+                                        loss_method=cfg.loss_method,
+                                        algo_dict=algo_dict)
+        
     def create_lm_scs_model(self, cfg, static_dict):
         static_M = static_dict['M']
 
@@ -740,7 +789,7 @@ class Workspace:
                                    algo_dict=algo_dict)
 
     def setup_opt_sols(self, algo, jnp_load_obj, N_train, N, num_plot=5):
-        if algo != 'scs' and algo != 'lah_scs' and algo != 'lm_scs':
+        if algo != 'scs' and algo != 'lah_scs' and algo != 'lm_scs' and algo != 'lah_accel_scs':
             z_stars = jnp_load_obj['z_stars']
             z_stars_train = z_stars[self.train_indices, :]
             z_stars_test = z_stars[self.test_indices, :]
@@ -966,7 +1015,7 @@ class Workspace:
         z_all = out_train[2]
         
 
-        if isinstance(self.l2ws_model, SCSmodel) or isinstance(self.l2ws_model, LAHSCSmodel) or isinstance(self.l2ws_model, LMSCSmodel):
+        if isinstance(self.l2ws_model, SCSmodel) or isinstance(self.l2ws_model, LAHSCSmodel) or isinstance(self.l2ws_model, LMSCSmodel) or isinstance(self.l2ws_model, LAHAccelSCSmodel):
             # out_train[6]
             z_plot = z_all[:, :, :-1] / (z_all[:, :, -1:] + 1e-10)
 
@@ -977,7 +1026,7 @@ class Workspace:
         else:
             z_plot = z_all
 
-        plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
+        # plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
 
         if self.l2ws_model.algo[:3] == 'lah':
             n_iters = 64 if col == 'silver' else self.l2ws_model.step_varying_num + 1 #51
@@ -1308,7 +1357,7 @@ class Workspace:
     def eval_iters_train_and_test(self, col, new_start_index):
         try:
             # pep_loss2 = self.l2ws_model.pep_clarabel(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
-            pep_loss3  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
+            pep_loss3  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
             # print('PEPLOSS2', pep_loss2)
             print('PEPLOSS3', pep_loss3)
         except Exception as e:

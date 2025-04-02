@@ -28,6 +28,8 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         num_points = input_dict['num_points']
         num_weights = 785
         self.q_mat_train, self.q_mat_test = input_dict['q_mat_train'], input_dict['q_mat_test']
+        
+        
 
         self.n = num_weights
         self.output_size = self.n
@@ -63,6 +65,8 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
 
         e2e_loss_fn = self.create_end2end_loss_fn
+        
+        self.num_pep_iters = 20
 
 
 
@@ -81,7 +85,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
         self.num_points = num_points
         
-        self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
+        self.pep_layer = self.create_nesterov_pep_sdp_layer(self.num_pep_iters)
 
 
     def compute_single_gradient(self, z, q):
@@ -105,17 +109,17 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         return batched_compute_gradient(batch_inputs, batch_q_data)
     
     
-    def pep_cvxpylayer(self, params):
-        # params = params.at[0,1].set(1)
-        step_sizes = params[:,0]
-        # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
+    # def pep_cvxpylayer(self, params):
+    #     # params = params.at[0,1].set(1)
+    #     step_sizes = params[:,0]
+    #     # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
 
-        beta = params[:,1]
-        beta_sq = beta ** 2
-        k = step_sizes.size
-        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
+    #     beta = params[:,1]
+    #     beta_sq = beta ** 2
+    #     k = step_sizes.size
+    #     G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
 
-        return H[-1] - H[0]
+    #     return H[-1] - H[0]
     
     def pep_clarabel(self, params):
         num_iters = params[:,0].size
@@ -287,11 +291,11 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         
     def pep_cvxpylayer(self, params):
         # params = params.at[0,1].set(1)
-        step_sizes = params[:,0]
+        step_sizes = params[:self.num_pep_iters,0]
 
-        beta = params[:,1]
+        beta = params[:self.num_pep_iters,1]
         # beta_sq = beta ** 2
-        k = step_sizes.size
+        # k = step_sizes.size
         
         A_param = build_A_matrix_with_yk_and_xstar(step_sizes, beta)
         G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 

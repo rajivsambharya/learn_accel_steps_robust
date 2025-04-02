@@ -385,9 +385,9 @@ def plot_step_sizes(example, cfg):
     step_sizes_dict = get_lah_gd_step_size(example, cfg)
     silver_step_sizes = step_sizes_dict['silver'].to_numpy()[:, 1]
     lah_step_sizes = step_sizes_dict['lah'].to_numpy()[:, 1]
-    lah_momentum_sizes = step_sizes_dict['lah'].to_numpy()[:, 1]
-    import pdb
-    pdb.set_trace()
+    lah_momentum_sizes = step_sizes_dict['lah'].to_numpy()[:, 2]
+    lah_onestep_momentum_sizes = step_sizes_dict['lah_one_step'].to_numpy()[:, 2]
+    nesterov_momentum_sizes = np.array([i / (i+3) for i in range(1000)]) #step_sizes_dict['nesterov'].to_numpy()[:, 2]
 
     # get the strongly convex and L-smooth values
     #       can get it from nesterov and no_train
@@ -416,7 +416,9 @@ def plot_step_sizes(example, cfg):
 
     # add in the horizontal lines for lah
     full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
-    num_lah = lah_step_sizes.size
+    num_lah = min(lah_step_sizes.size, step_size_iters)
+    # import pdb
+    # pdb.set_trace()
     full_lah[:num_lah] = lah_step_sizes[:num_lah]
     bars = axes[1].bar(np.arange(step_size_iters), full_lah, color=colors[1])
     axes[1].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[3])
@@ -428,7 +430,7 @@ def plot_step_sizes(example, cfg):
     plt.tight_layout()
     plt.savefig('step_sizes.pdf', bbox_inches='tight')
 
-    # lah_onestep_sizes = step_sizes_dict['lah_one_step'].to_numpy()[:, 1]
+    lah_onestep_sizes = step_sizes_dict['lah_one_step'].to_numpy()[:, 1]
 
     if example == 'ridge_regression':
         lah_twostep_sizes = step_sizes_dict['lah_two_step'].to_numpy()[:, 1]
@@ -510,9 +512,9 @@ def plot_step_sizes(example, cfg):
         axes[0].set_xlabel('iterations') #, fontsize=16)
         axes[1].set_xlabel('iterations')
         axes[2].set_xlabel('iterations')
-        axes[0].set_title('silver') #, color=colors[2])
-        axes[1].set_title('LAH: 1 step at a time') #, color=colors[1])
-        axes[2].set_title('LAH: 10 steps at a time') #, color=colors[1])
+        axes[0].set_title('Nesterov') #, color=colors[2])
+        axes[1].set_title(r'Some robustness: $\gamma =0.7$') #, color=colors[1])
+        axes[2].set_title('No robustness') #, color=colors[1])
         axes[0].set_ylabel('step sizes')
         # axes[1, 0].set_ylabel('gain to cold start')
 
@@ -523,62 +525,77 @@ def plot_step_sizes(example, cfg):
         cmap = plt.cm.Set1
         colors = cmap.colors
         step_size_iters = cfg.step_size_iters
-        axes[0].bar(np.arange(step_size_iters), silver_step_sizes[:step_size_iters], color='0.3')
+        # axes[0].bar(np.arange(step_size_iters), silver_step_sizes[:step_size_iters], color='0.3')
+        axes[0].bar(np.arange(step_size_iters), nesterov_step_size, color='0.3')
         axes[0].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
 
         # plot the bar plot for the learned method
 
         # add in the horizontal lines for lah
         full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
-        num_lah = lah_step_sizes.size
+        # num_lah = lah_step_sizes.size
+        num_lah = min(lah_step_sizes.size, step_size_iters)
         full_lah[:num_lah] = lah_step_sizes[:num_lah]
         bars = axes[2].bar(np.arange(step_size_iters), full_lah, color='0.3')
         axes[2].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
         # Change the color of the bars from num_lah onward
-        for i in range(num_lah - 1, len(bars)):
-            bars[i].set_color('0.6')
+        # for i in range(num_lah - 1, len(bars)):
+        #     bars[i].set_color('0.6')
 
         # add in the horizontal lines for lah one step
-        # full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
+        full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
         # num_lah = lah_step_sizes.size
-        # full_lah[:num_lah] = lah_onestep_sizes[:num_lah]
+        num_lah = min(lah_step_sizes.size, step_size_iters)
+        full_lah[:num_lah] = lah_onestep_sizes[:num_lah]
         # full_lah[100] = full_lah[101] 
-        # bars = axes[1].bar(np.arange(step_size_iters), full_lah, color='0.3')
-        # axes[1].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
-        # # Change the color of the bars from num_lah onward
+        bars = axes[1].bar(np.arange(step_size_iters), full_lah, color='0.3')
+        axes[1].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
+        # Change the color of the bars from num_lah onward
         # for i in range(num_lah - 1, len(bars)):
         #     bars[i].set_color('0.6')
 
         plt.tight_layout()
         plt.savefig('step_sizes_all.pdf', bbox_inches='tight')
         
+        fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(23, 6), sharey='row') #, sharey=True)
+        axes[0].set_xlabel('iterations') #, fontsize=16)
+        axes[1].set_xlabel('iterations')
+        axes[2].set_xlabel('iterations')
+        axes[0].set_title('Nesterov') #, color=colors[2])
+        axes[1].set_title(r'Some robustness: $\gamma =0.7$') #, color=colors[1])
+        axes[2].set_title('No robustness') #, color=colors[1])
+        axes[0].set_ylabel('momentum sizes')
+        
         # plot the bar plot for silver
         cmap = plt.cm.Set1
         colors = cmap.colors
         step_size_iters = cfg.step_size_iters
-        axes[0].bar(np.arange(step_size_iters), silver_step_sizes[:step_size_iters], color='0.3')
-        axes[0].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
+        # axes[0].bar(np.arange(step_size_iters), silver_step_sizes[:step_size_iters], color='0.3')
+        axes[0].bar(np.arange(step_size_iters), nesterov_momentum_sizes[:step_size_iters], color='0.3')
+        axes[0].hlines(1, 0, step_size_iters, color=colors[7], linewidth=2.5)
 
         # plot the bar plot for the learned method
 
         # add in the horizontal lines for lah
         full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
-        num_lah = lah_step_sizes.size
+        # num_lah = lah_step_sizes.size
+        num_lah = min(lah_step_sizes.size, step_size_iters)
         full_lah[:num_lah] = lah_momentum_sizes[:num_lah]
         bars = axes[2].bar(np.arange(step_size_iters), full_lah, color='0.3')
-        axes[2].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
+        axes[2].hlines(1, 0, step_size_iters, color=colors[7], linewidth=2.5)
         # Change the color of the bars from num_lah onward
-        for i in range(num_lah - 1, len(bars)):
-            bars[i].set_color('0.6')
+        # for i in range(num_lah - 1, len(bars)):
+        #     bars[i].set_color('0.6')
 
         # add in the horizontal lines for lah one step
-        # full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
+        full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
         # num_lah = lah_step_sizes.size
-        # full_lah[:num_lah] = lah_momentum_sizes[:num_lah]
+        num_lah = min(lah_step_sizes.size, step_size_iters)
+        full_lah[:num_lah] = lah_onestep_momentum_sizes[:num_lah]
         # full_lah[100] = full_lah[101] 
-        # bars = axes[1].bar(np.arange(step_size_iters), full_lah, color='0.3')
-        # axes[1].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[7], linewidth=2.5)
-        # # Change the color of the bars from num_lah onward
+        bars = axes[1].bar(np.arange(step_size_iters), full_lah, color='0.3')
+        axes[1].hlines(1, 0, step_size_iters, color=colors[7], linewidth=2.5)
+        # Change the color of the bars from num_lah onward
         # for i in range(num_lah - 1, len(bars)):
         #     bars[i].set_color('0.6')
 
@@ -600,6 +617,7 @@ def get_lah_gd_step_size(example, cfg):
 
 def get_step_sizes(example, dt, method):
     step_sizes = recover_step_sizes_data(example, dt, method)
+    
     return step_sizes
 
 
@@ -806,16 +824,6 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
 
 
 def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters):
-    # plot the primal and dual residuals next to each other
-    # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
-    # axes[0].set_yscale('log')
-    # axes[1].set_yscale('log')
-    # axes[1].set_xlabel('iterations')
-    # axes[0].set_title('objective suboptimality')
-
-    # axes[0].set_ylabel('objective suboptimality')
-    # axes[1].set_ylabel('gain to vanilla')
-
     # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
@@ -831,12 +839,15 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
 
     methods = list(results_dict.keys())
     markevery = int(num_iters / 20)
+
     for i in range(len(methods)):
         method = methods[i]
         style = titles_2_styles[method]
         marker = titles_2_markers[method]
         color = titles_2_colors[method]
         mark_start = titles_2_marker_starts[method]
+        # import pdb
+        # pdb.set_trace()
 
         if method == 'lm' and 'lm10000' in methods:
             continue
@@ -846,14 +857,11 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
         # plot the values
         if example == 'logistic_regression':
             plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,
-                     markevery=(mark_start, 0.1))
+                     markevery=(0, 3))
         else:
             plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color, 
                                     markevery=(mark_start, markevery))
         
-        # plot the gains
-        # axes[1].plot(gains_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color, 
-        #                         markevery=(mark_start, markevery))
 
     plt.tight_layout()
     plt.savefig('obj_diff.pdf', bbox_inches='tight')

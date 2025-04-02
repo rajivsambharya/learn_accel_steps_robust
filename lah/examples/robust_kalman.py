@@ -890,7 +890,7 @@ def run(run_cfg, lah=True):
     static_flag = True
 
     custom_visualize_fn_partial = partial(custom_visualize_fn, T=setup_cfg['T'])
-    algo = 'lah_scs' if lah else 'lm_scs'
+    algo = 'lah_accel_scs' if lah else 'lm_scs'
 
     A = static_dict['A_sparse']
     m, n = A.shape
@@ -900,7 +900,7 @@ def run(run_cfg, lah=True):
     custom_loss = partial(rkf_loss, T=setup_cfg['T'])
 
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example,
-                          custom_visualize_fn=custom_visualize_fn_partial,
+                        #   custom_visualize_fn=custom_visualize_fn_partial,
                           custom_loss=custom_loss,
                           shifted_sol_fn=batch_shifted_sol_fn,
                           traj_length=setup_cfg['rollout_length'])

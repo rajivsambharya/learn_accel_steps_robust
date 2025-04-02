@@ -33,6 +33,8 @@ class L2WSmodel(object):
     def __init__(self, 
                  train_unrolls=5,
                  step_varying_num=50,
+                 pep_regularizer_coeff=None,
+                 pep_target=None,
                  train_inputs=None,
                  test_inputs=None,
                  regression=False,
@@ -49,19 +51,10 @@ class L2WSmodel(object):
                  y_stars_test=None,
                  loss_method='fixed_k',
                  algo_dict={}):
-        self.train_case = 'gradient'
+        self.pep_regularizer_coeff = pep_regularizer_coeff
+        self.pep_target = pep_target
         dict = algo_dict
         self.key = 0
-        self.sigma = 0.01
-        self.b = pac_bayes_cfg.get('b', 100)
-        self.c = pac_bayes_cfg.get('c', 2.0)
-        self.delta = pac_bayes_cfg.get('delta', 0.00001)
-        self.delta2 = pac_bayes_cfg.get('delta', 0.00001)
-        # self.target_pen = pac_bayes_cfg['target_pen']
-        self.init_var = pac_bayes_cfg.get('init_var', 1e-1) # initializes all of s and the prior
-        self.penalty_coeff = pac_bayes_cfg.get('penalty_coeff', 1.0)
-        self.deterministic = pac_bayes_cfg.get('deterministic', False)
-        self.prior = 0
 
         # essential pieces for the model
         self.initialize_essentials(jit, eval_unrolls, train_unrolls, train_inputs, test_inputs)
@@ -95,11 +88,6 @@ class L2WSmodel(object):
         # init to track training
         self.init_train_tracking()
 
-        self.compute_avg_opt()
-
-        
-    def compute_avg_opt(self):
-        pass
 
     def reinit_losses(self):
         self.create_all_loss_fns(self.loss_method, self.regression)
@@ -187,10 +175,6 @@ class L2WSmodel(object):
             print('z_final', z_final)
             loss = self.final_loss(loss_method, z_final, iter_losses, supervised, z0, z_star)
 
-            # penalty_loss = calculate_total_penalty(self.N_train, params, self.b, self.c, self.delta)
-            # penalty_loss = calculate_pinsker_penalty(self.N_train, params, self.b, self.c, self.delta)
-            # loss = loss #+ self.penalty_coeff * penalty_loss
-
             if diff_required:
                 return loss
             else:
@@ -198,90 +182,24 @@ class L2WSmodel(object):
                 return return_out
         loss_fn = self.predict_2_loss(predict, diff_required)
         return loss_fn
-    
-
-    def train_stochastic(self, prev_params, train_case, placeholder, n_iters, params, state):
-        mean, var = self.gauss_mean, self.gauss_var
-        if train_case == 'stochastic_one_step_grad':
-            alpha = one_step_stochastic_quad_gd_solver(mean, var, prev_params, self.P)
-            params[0] = jnp.log(jnp.array([[alpha]]))
-        elif train_case == 'stochastic_two_step_quad': 
-            # gradients = self.compute_gradients(batch_inputs, batch_q_data)
-            P = self.P
-            alpha, beta = two_step_stochastic_quad_gd_solver(mean, var, prev_params, P)
-            # import pdb
-            # pdb.set_trace()
-            params[0] = jnp.log(jnp.array([[alpha, beta]])).T
-        elif train_case == 'stochastic_three_step_quad': 
-            # gradients = self.compute_gradients(batch_inputs, batch_q_data)
-            P = self.P
-            alpha, beta, gamma = three_step_stochastic_quad_gd_solver(mean, var, prev_params, P)
-            # import pdb
-            # pdb.set_trace()
-            params[0] = jnp.log(jnp.array([[alpha, beta, gamma]])).T
-            # return state.value, jnp.log(jnp.array([[alpha, beta, gamma]])).T, state
-        elif train_case == 'stochastic_multi_step_quad': 
-            params_matrix = jnp.tile(prev_params[0], (placeholder.shape[0], 1))
-            # import pdb
-            # pdb.set_trace()
-            z_bar = stochastic_get_z_bar(self.gauss_mean, self.gauss_var, prev_params, self.P)
-            z_bar_mat = jnp.tile(z_bar, (placeholder.shape[0], 1))
-            results = self.optimizer.update(params=params,
-                                            state=state,
-                                            inputs=z_bar_mat,
-                                            b=placeholder,
-                                            iters=self.train_unrolls,
-                                            z_stars=placeholder,
-                                            key=n_iters)
-            params, state = results
-        # return params
-        # import pdb
-        # pdb.set_trace()
-        return state.value, params, state
 
 
     def train_batch(self, batch_indices, inputs, params, state, n_iters, train_case='gradient'):
-        if train_case[:10] == 'stochastic':
-            # prev_params = [inputs[0]]
-            prev_params = inputs
-            placeholder = self.q_mat_train
-            # params[0] = self.train_stochastic(prev_params, train_case, params, state)
-            # return state.value, params, state
-            return self.train_stochastic(prev_params, train_case, placeholder, n_iters, params, state)
         batch_inputs = inputs[batch_indices, :]
         batch_q_data = self.q_mat_train[batch_indices, :]
         batch_z_stars = self.z_stars_train[batch_indices, :]
 
         key = n_iters #1 if params[0].shape[0] == 0 else self.train_unrolls #state.iter_num
 
-        if train_case == 'one_step_grad':
-            gradients = self.compute_gradients(batch_inputs, batch_q_data)
-            alpha = one_step_gd_solver(batch_z_stars, batch_inputs, gradients)
-            params[0] = jnp.log(jnp.array([[alpha]]))
-        elif train_case == 'two_step_quad': 
-            # gradients = self.compute_gradients(batch_inputs, batch_q_data)
-            P = self.P
-            alpha, beta = two_step_quad_gd_solver(batch_z_stars, batch_inputs, P)
-            # import pdb
-            # pdb.set_trace()
-            params[0] = jnp.log(jnp.array([[alpha, beta]])).T
-        elif train_case == 'three_step_quad': 
-            # gradients = self.compute_gradients(batch_inputs, batch_q_data)
-            P = self.P
-            alpha, beta, gamma = three_step_quad_gd_solver(batch_z_stars, batch_inputs, P)
-            # import pdb
-            # pdb.set_trace()
-            params[0] = jnp.log(jnp.array([[alpha, beta, gamma]])).T
-        else:
-            # gradient-based methods
-            results = self.optimizer.update(params=params,
-                                            state=state,
-                                            inputs=batch_inputs,
-                                            b=batch_q_data,
-                                            iters=self.train_unrolls,
-                                            z_stars=batch_z_stars,
-                                            key=key)
-            params, state = results
+        # gradient-based methods
+        results = self.optimizer.update(params=params,
+                                        state=state,
+                                        inputs=batch_inputs,
+                                        b=batch_q_data,
+                                        iters=self.train_unrolls,
+                                        z_stars=batch_z_stars,
+                                        key=key)
+        params, state = results
         self.key = key
         print('params', params)
         return state.value, params, state
@@ -459,30 +377,10 @@ class L2WSmodel(object):
         if bypass_nn:
             z0 = input
         else:
-            # old stochastic
-            # perturb = get_perturbed_weights(random.PRNGKey(key), self.layer_sizes, jnp.sqrt(sigma))
-            # perturbed_weights = [(perturb[i][0] + params[i][0], 
-            #                       0*perturb[i][1] + params[i][1]) for i in range(len(params))]
-            # print('perturbed_weights', perturbed_weights)
-
             # new stochastic
             mean_params = params[0]
             nn_output = predict_y(mean_params, input)
 
-            # mean_params, sigma_params, prior_var = params[0], params[1], params[2]
-            # if self.deterministic:
-            #     nn_output = predict_y(mean_params, input)
-            # else:
-            #     perturb = get_perturbed_weights(random.PRNGKey(key), self.layer_sizes, 1)
-            #     perturbed_weights = [(perturb[i][0] * jnp.sqrt(jnp.exp(sigma_params[i][0])) + mean_params[i][0], 
-            #                         perturb[i][1] * jnp.sqrt(jnp.exp(sigma_params[i][1])) + mean_params[i][1]) for i in range(len(mean_params))]
-            #     # perturbed_weights = [(perturb[i][0] * jnp.sqrt(1 / (1 + jnp.exp(-sigma_params[i][0]))) + mean_params[i][0], 
-            #     #                     perturb[i][1] * jnp.sqrt(1 / (1 + jnp.exp(-sigma_params[i][1]))) + mean_params[i][1]) for i in range(len(mean_params))]
-
-            #     nn_output = predict_y(perturbed_weights, input)
-
-            # deterministic
-            # nn_output = predict_y(params, input)
             z0 = nn_output
         if self.algo == 'scs':
             z0_full = jnp.ones(z0.size + 1)
@@ -552,27 +450,18 @@ class L2WSmodel(object):
         batch_predict = vmap(predict_partial,
                                 in_axes=(None, 0, 0, None, 0, None),
                                 out_axes=out_axes)
-        
 
-        # @partial(jit, static_argnums=(3, 5,))
         @partial(jit, static_argnames=['iters', 'key'])
         def loss_fn(params, inputs, b, iters, z_stars, key):
-            # import pdb
-            # pdb.set_trace()
-            # mean_step_size = jnp.mean(jnp.exp(params[0][:,0]))
-            # params[0] = params[0].at[:,0].set(jnp.log(jnp.exp(params[0][:,0]) - mean_step_size + 1 / self.smooth_param))
-            
             if diff_required:
                 losses = batch_predict(params, inputs, b, iters, z_stars, key)
                 
                 # update so that we have pep
                 pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
-                # return losses.mean() + (pep_loss - 0.99650435 ** iters) ** 2
-                # return losses.mean() #+ 50 * (pep_loss - 0.13288388) ** 2 
-                # return losses.mean() + 5 * (pep_loss - 0.1427964195836998) ** 2 
-                # return losses.mean() + jnp.clip(500 * (pep_loss - 0.3), a_min=0, a_max=30)
-                # return losses.mean() + 5 * (pep_loss - 0.15) ** 2
-                return losses.mean() + 10 * (pep_loss - 0.7) ** 2
+                if self.pep_regularizer_coeff is not None:
+                    return losses.mean() + self.pep_regularizer_coeff * (pep_loss - self.pep_target) ** 2
+                else:
+                    return losses.mean()
             else:
                 predict_out = batch_predict(
                     params, inputs, b, iters, z_stars, key)
@@ -586,10 +475,8 @@ class L2WSmodel(object):
                 # pep_loss3  = self.pepit_nesterov_check(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
                 # print('PEPLOSS3', pep_loss3)
                 
-                pep_loss = 0
+                # pep_loss = 0
                 self.pep_penalty = pep_loss
-                # import pdb
-                # pdb.set_trace()
                 
                 return losses.mean(), predict_out
 
