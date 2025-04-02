@@ -180,7 +180,7 @@ class L2Omodel(object):
         return loss_fn
 
 
-    def train_batch(self, batch_indices, inputs, params, state, n_iters, train_case='gradient'):
+    def train_batch(self, batch_indices, inputs, params, state, n_iters):
         batch_inputs = inputs[batch_indices, :]
         batch_q_data = self.q_mat_train[batch_indices, :]
         batch_z_stars = self.z_stars_train[batch_indices, :]
@@ -463,7 +463,7 @@ class L2Omodel(object):
                 # print('PEPLOSS3', pep_loss3)
                 
                 # pep_loss = 0
-                self.pep_penalty = pep_loss
+                self.pep_penalty = 0
                 
                 return losses.mean(), predict_out
 
