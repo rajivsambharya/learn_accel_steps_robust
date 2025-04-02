@@ -7,14 +7,14 @@ import numpy as np
 
 from lah.algo_steps import k_steps_eval_lah_gd, k_steps_train_lah_gd, k_steps_eval_nesterov_gd, k_steps_eval_conj_grad
 from lah.algo_steps_gd import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
 from functools import reduce
 
 
 
-class LAHAccelGDmodel(L2WSmodel):
+class LAHAccelGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHAccelGDmodel, self).__init__(**kwargs)
 

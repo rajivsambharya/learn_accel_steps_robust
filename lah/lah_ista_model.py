@@ -6,7 +6,7 @@ from jax import random
 import numpy as np
 
 from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
 from jax import vmap, jit
@@ -19,7 +19,7 @@ from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.primitive_steps import proximal_step
 
 
-class LAHISTAmodel(L2WSmodel):
+class LAHISTAmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHISTAmodel, self).__init__(**kwargs)
 

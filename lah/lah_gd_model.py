@@ -6,13 +6,13 @@ from jax import random
 import numpy as np
 
 from lah.algo_steps import k_steps_eval_lah_gd, k_steps_train_lah_gd, k_steps_eval_nesterov_gd, k_steps_eval_conj_grad
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
 from functools import reduce
 
 
-class LAHGDmodel(L2WSmodel):
+class LAHGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHGDmodel, self).__init__(**kwargs)
 

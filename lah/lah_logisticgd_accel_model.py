@@ -6,18 +6,15 @@ from jax import random, vmap
 import numpy as np
 
 from lah.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient
-from lah.l2ws_model import L2WSmodel
-from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
+from lah.l2o_model import L2Omodel
 from PEPit import PEP
 from PEPit.functions import SmoothStronglyConvexFunction
-from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
-from PEPit.primitive_steps import proximal_step
 import cvxpy as cp
 from cvxpylayers.jax import CvxpyLayer
 from jax import lax
 
 
-class LAHAccelLOGISTICGDmodel(L2WSmodel):
+class LAHAccelLOGISTICGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHAccelLOGISTICGDmodel, self).__init__(**kwargs)
 
@@ -29,8 +26,6 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         num_weights = 785
         self.q_mat_train, self.q_mat_test = input_dict['q_mat_train'], input_dict['q_mat_test']
         
-        
-
         self.n = num_weights
         self.output_size = self.n
 
@@ -47,28 +42,21 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
         self.smooth_param = jnp.max(evals) / 4
 
-        # cond_num = self.smooth_param / self.str_cvx_param
-
         self.k_steps_train_fn = partial(k_steps_train_lah_nesterov_gd, num_points=num_points,
                                         jit=self.jit)
         self.k_steps_eval_fn = partial(k_steps_eval_lah_nesterov_gd, num_points=num_points, 
                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_nesterov_logisticgd, num_points=num_points,
                                        jit=self.jit)
-        # self.conj_grad_eval_fn = partial(k_steps_eval_conj_grad, num_points=num_points,
-        #                                jit=self.jit)
+
         self.out_axes_length = 5
 
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, num_weights))
 
-
-
         e2e_loss_fn = self.create_end2end_loss_fn
         
         self.num_pep_iters = 20
-
-
 
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
@@ -77,9 +65,6 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_conj_grad = e2e_loss_fn(bypass_nn=False, diff_required=False, 
                                                special_algo='conj_grad')
-
-        # end-to-end added fixed warm start eval - bypasses neural network
-        # self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
 
         self.num_const_steps = input_dict.get('num_const_steps', 1)
 
@@ -99,137 +84,12 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         dw, db = compute_gradient(X, y, y_hat)
         return jnp.hstack([dw, db])
 
-    # def compute_gradients(self, batch_inputs, batch_q_data):
-    #     # TODO
-    #     return gradients
 
     def compute_gradients(self, batch_inputs, batch_q_data):
         # Use vmap to vectorize compute_single_gradient over the batch dimensions
         batched_compute_gradient = vmap(self.compute_single_gradient, in_axes=(0, 0))
         return batched_compute_gradient(batch_inputs, batch_q_data)
     
-    
-    # def pep_cvxpylayer(self, params):
-    #     # params = params.at[0,1].set(1)
-    #     step_sizes = params[:,0]
-    #     # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
-
-    #     beta = params[:,1]
-    #     beta_sq = beta ** 2
-    #     k = step_sizes.size
-    #     G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
-
-    #     return H[-1] - H[0]
-    
-    def pep_clarabel(self, params):
-        num_iters = params[:,0].size
-        step_sizes = params[:,0]
-        beta_vals = params[:,1]
-        beta_sq_vals = beta_vals ** 2
-        proj = True
-        step_sizes_param = cp.Parameter(num_iters)
-        beta_param = cp.Parameter(num_iters)
-        beta_param_sq = cp.Parameter(num_iters)
-
-        k = num_iters #step_sizes.size
-        G = cp.Variable((3*(k+1)+2, 3*(k+1)+2), symmetric=True) # gram matrix
-        H = cp.Variable(k+2)
-        if not proj:
-            F = cp.Variable(k+1)
-
-        tol = 0
-        constraints = [G >> tol*np.eye(3*(k+1)+2)]
-
-        # denom
-        constraints.append(G[0, 0] - 2*G[0,1] + G[1, 1] == 1)
-        
-        # make y0 = z0
-        y_ind_start = 2*(k+1)+2
-        constraints.append(G[0, 0] - 2*G[0,y_ind_start] + G[y_ind_start, y_ind_start] == 0)
-
-        # num
-        x_k_ind = get_x_index_subdiff(k, k)
-        print('x_k_ind', x_k_ind)
-        
-        # subgradient inequalities: ∂h(x_i)^T (x_i - x_j) >= 0
-        # (y_{i-1} - x_i)^T (x_i - x_j) >= 0 -- based on triples (x_i, y_{i-1}, x_j)
-        # x_list_subgrad, s_list_subgrad = collect_subgrad_subdiff_indices(k, 1)
-        y_list, x_list, s_list = collect_nesterov_subdiff_indices(k)
-        print('y_list', y_list)
-        print('x_list', x_list)
-        print('s_list', s_list)
-        for i in range(len(x_list)):
-            y_i_ind = y_list[i]
-            x_i_ind = x_list[i]
-            s_i_ind = s_list[i]
-            if x_i_ind == 1:
-                x_i_prev_ind = x_i_ind
-                alpha_i = 1
-            elif x_i_ind == 3:
-                x_i_prev_ind = 0
-                alpha_i = step_sizes_param[0]
-            else:
-                x_i_prev_ind = x_i_ind - 1
-                alpha_i = step_sizes_param[i-1]
-            for j in range(len(y_list)):
-                y_j_ind = y_list[j]
-                if y_j_ind != y_i_ind:
-                    if proj:
-                        # constraints.append(G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
-                        constraints.append(G[x_i_ind, y_i_ind] - G[x_i_ind, y_j_ind] -G[y_i_ind, y_i_ind] +  G[y_i_ind, y_j_ind] -alpha_i*G[s_i_ind, y_i_ind] +alpha_i* G[s_i_ind, y_j_ind] >= 0)
-                    else:
-                        constraints.append((F[j] - F[i])  + G[s_i_ind, x_i_ind] - G[s_i_ind, x_j_ind] >= 0)
-                    # import pdb
-                    # pdb.set_trace()
-                    
-            # constraints.append(G[x_i_prev_ind, x_i_ind] - G[x_i_prev_ind, 0] -G[x_i_ind, x_i_ind] +  G[x_i_ind, 0] -alpha_i*G[s_i_ind, x_i_ind] +alpha_i* G[s_i_ind, 0] >= 0)
-
-
-        # x_list, x_next_list, s_list, step_size_list = collect_linear_subdiff_indices(k, [step_sizes_param]) # Q u_i = v_i for i =1, ..., len(x_list) (these are diff)
-        x_list, s_list = collect_linear_grad_indices(k)
-        print('x_list', x_list)
-        # print('x_next_list', x_next_list)
-        print('s_list', s_list)
-        # print('step_size_list', step_size_list)
-
-        # u_i^T v_j = u_j^T v_i (i neq j) where u_i = x_i i=0,...,k-1 and v_j = 1 / alpha_j (x_j - y_j)
-        for i in range(len(x_list)):
-            x_i_ind = x_list[i]
-            # x_next_i_ind = x_next_list[i]
-            s_i_ind = s_list[i]
-            # alpha_i = step_size_list[i]
-            # if i == 0:
-            #     alpha_i_sq = 1
-            # else:
-            #     alpha_i_sq = cross_alpha_ij[i-1, i-1]
-            for j in range(len(x_list)):
-                if i != j:
-                    x_j_ind = x_list[j]
-                    s_j_ind = s_list[j]
-
-                    constraints.append((H[i] - H[j]) >=  G[s_j_ind, x_i_ind] - G[s_j_ind, x_j_ind] + 1  / (2 * self.smooth_param) * (G[s_i_ind, s_i_ind] + G[s_j_ind, s_j_ind] - 2 * G[s_i_ind, s_j_ind])) 
-                    
-        for i in range(k):
-            beta_ind = i
-            x_i_ind = 3 + i
-            y_i_ind = y_ind_start + i + 1
-            y_prev_i_ind = 0 if y_i_ind == 3 else y_i_ind - 1
-            constraints.append(G[x_i_ind, x_i_ind] + (beta_param_sq[beta_ind] + 2*beta_param[beta_ind] + 1)  * G[y_i_ind, y_i_ind] + beta_param_sq[beta_ind] * G[y_prev_i_ind, y_prev_i_ind] + 2 * beta_param[beta_ind] * G[y_prev_i_ind, x_i_ind] - 2 * (beta_param[beta_ind] + beta_param_sq[beta_ind]) * G[y_prev_i_ind, y_i_ind] -2 * (beta_param[beta_ind] + 1) * G[x_i_ind, y_i_ind] == 0)
-
-        prob = cp.Problem(cp.Maximize(H[-1] - H[0]), constraints)
-        # step_sizes_param.value = np.ones(num_iters) / np.array(self.smooth_param)
-
-        beta_param.value = beta_vals #np.ones(num_iters)
-        beta_param_sq.value = (beta_param.value)**2 #np.ones(num_iters)
-        step_sizes_param.value = step_sizes
-        
-        try:
-            prob.solve(verbose=True, solver=cp.CLARABEL)
-            return prob.value
-        except Exception as e:
-            print('exception clarabel', e)
-            return 0
-
 
     def transform_params(self, params, n_iters):
         # n_iters = params[0].size
@@ -285,20 +145,15 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
         # init steady_state_params
         steady_state_params = 0 * jnp.ones((1, 2)) #sigmoid_inv(0) * jnp.ones((1, 1))
-
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
-        # sigmoid_inv(beta)
+        
         
     def pep_cvxpylayer(self, params):
-        # params = params.at[0,1].set(1)
         step_sizes = params[:self.num_pep_iters,0]
-
-        beta = params[:self.num_pep_iters,1]
-        # beta_sq = beta ** 2
-        # k = step_sizes.size
+        momentum_sizes = params[:self.num_pep_iters,1]
         
-        A_param = build_A_matrix_with_yk_and_xstar(step_sizes, beta)
-        G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
+        A_param = build_A_matrix_with_yk_and_xstar(step_sizes, momentum_sizes)
+        G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True})
 
         return H[-3] - H[-1]
 
@@ -318,7 +173,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
                     # for step-varying training
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
             else:
-                if special_algo == 'silver' or special_algo == 'conj_grad':
+                if special_algo == 'silver':
                     stochastic_params = params[0]
                 else:
                     n_iters = key #min(iters, 51)
@@ -327,7 +182,6 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
                     # stochastic_params = stochastic_params.at[n_iters - 1, 0].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, 0]))
                     stochastic_params = self.transform_params(params, n_iters)
 
-            
             if self.train_fn is not None:
                 train_fn = self.train_fn
             else:
@@ -338,16 +192,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
                 eval_fn = self.k_steps_eval_fn
 
             # stochastic_params = params[0][:n_iters, 0]
-            if special_algo == 'conj_grad':
-                eval_out = self.conj_grad_eval_fn(k=iters,
-                                   z0=z0,
-                                   q=q,
-                                   params=stochastic_params,
-                                   supervised=supervised,
-                                   z_star=z_star)
-                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
-                angles = None
-            elif bypass_nn:
+            if bypass_nn:
                 # use nesterov's acceleration
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
@@ -379,9 +224,6 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
             loss = self.final_loss(loss_method, z_final,
                                    iter_losses, supervised, z0, z_star)
 
-            # penalty_loss = calculate_pinsker_penalty(self.N_train, params, self.b, self.c, self.delta)
-            # loss = loss + self.penalty_coeff * penalty_loss
-
             if diff_required:
                 return loss
             else:
@@ -392,11 +234,10 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         return loss_fn
     
     
-    def create_nesterov_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
+    def create_nesterov_pep_sdp_layer(self, num_iters):
         """
         ordering: x*, x_0,...,x_{p-1}, s*,s_0,..,s_{p-1}
         """
-
         k = num_iters
         A = cp.Parameter((k+3, k+3))
         L = self.smooth_param
@@ -464,12 +305,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
         
         # beta_list = jnp.array([i / (i+3) for i in range(num_iters)])
-        # import pdb
-        # pdb.set_trace()
-        
-        # A_val = build_A_matrix_with_yk_and_xstar(jnp.ones(num_iters) / self.smooth_param, beta_list)
-        # out = cvxpylayer(A_val, solver_args={"solve_method": "CLARABEL", "verbose": True})
-        
+
         return cvxpylayer
     
     def pep_clarabel(self, params):
@@ -552,7 +388,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
     def pepit_nesterov_check(self, params):
         num_iters = params[:,0].size
         step_sizes = params[:,0]
-        beta_vals = np.clip(params[:,1], a_min=0, a_max=100)
+        beta_vals = params[:,1]
         
         # Instantiate PEP
         problem = PEP()
@@ -561,12 +397,9 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
 
         # Declare a strongly convex smooth function and a convex function
         f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
-        # h = problem.declare_function(ConvexIndicatorFunction)
-        # h = problem.declare_function(ConvexFunction)
-        # F = f #+ h
 
         # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
-        xs = f.stationary_point() #F.stationary_point()
+        xs = f.stationary_point()
         fs = f(xs)
 
         # Then define the starting point x0
@@ -579,12 +412,6 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
         x_new = x0
         y = x0
         for i in range(num_iters):
-            # if i < num_iters:
-            #     alpha = step_sizes[i]
-            #     beta = beta_vals[i]
-            # else:
-            #     alpha = 1 / L
-            #     beta = i / (i + 3)
             alpha = step_sizes[i]
             beta = beta_vals[i]
             x_old = x_new
@@ -592,11 +419,7 @@ class LAHAccelLOGISTICGDmodel(L2WSmodel):
             y = x_new + beta * (x_new - x_old)
 
         # Set the performance metric to the function value accuracy
-        # problem.set_performance_metric((f(x_new)) - fs)
         problem.set_performance_metric((f(y)) - fs)
-        
-        # import pdb
-        # pdb.set_trace()
 
         # Solve the PEP
         verbose = 1
@@ -647,57 +470,6 @@ def convert_t_to_beta(t_vals):
     return beta_vals
 
 
-# def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
-#     """
-#     Returns A matrix of shape (k+3, k+3), where:
-#     - A[0] to A[k] represent x_0 to x_k
-#     - A[k+1] represents y_k
-#     - A[k+2] represents x_star
-
-#     Basis: [x_0, x_star, g_0, ..., g_{k-1}, g_f]
-#     """
-#     k = len(alpha_list)
-#     assert len(beta_list) == k, "Length of beta_list must match alpha_list"
-
-#     A = np.zeros((k + 3, k + 3))  # Rows: x_0 to x_k, y_k, x_star
-#     idx_x0 = 0
-#     idx_xstar = 1
-#     idx_g = lambda t: 2 + t
-#     idx_gf = 2 + k  # g_f = ∇f(y_k)
-
-#     # x_0 = [1, 0, 0, ..., 0]
-#     A[0, idx_x0] = 1.0
-
-#     # Build x_1 to x_k
-#     for i in range(k):
-#         # Construct y_i = x_i + β_i (x_i - x_{i-1})
-#         x_i = A[i]
-#         x_im1 = A[i - 1] if i > 0 else A[0]
-
-#         y_i = x_i.copy()
-#         y_i[idx_g(i)] -= alpha_list[i]
-#         y_im1 = x_im1.copy()
-#         if i == 0:
-#             y_im1[idx_g(i)] -= alpha_list[i]
-#         else:
-#             y_im1[idx_g(i-1)] -= alpha_list[i-1]
-
-#         # A[i + 1] = x_ip1  # Store x_{i+1}
-#         A[i + 1] = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
-
-#     # Final extrapolated point: y_k = x_k + β_k (x_k - x_{k-1})
-#     x_k = A[k]
-#     x_km1 = A[k - 1] if k >= 1 else A[0]
-#     beta_k = beta_list[k - 1]
-#     y_k = (1 + beta_k) * x_k - beta_k * x_km1
-#     A[k + 1] = y_k  # Store y_k
-
-#     # x_star
-#     A[k + 2, idx_xstar] = 1.0
-
-#     return A
-
-
 def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
     """
     JAX-friendly version of build_A_matrix_with_yk_and_xstar.
@@ -716,7 +488,6 @@ def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
     idx_x0 = 0
     idx_xstar = 1
     idx_g = lambda t: 2 + t
-    idx_gf = 2 + k
 
     # Initialize A[0] = x0
     A0 = A0.at[0, idx_x0].set(1.0)

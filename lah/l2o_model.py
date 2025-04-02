@@ -9,16 +9,12 @@ from jax import jit, random, vmap
 # from jax.config import config
 from jaxopt import OptaxSolver
 
-from lah.low_step_solvers import two_step_data_quad_gd_solver, one_step_gd_solver, one_step_prox_gd_solver, three_step_data_quad_gd_solver, two_step_stochastic_quad_gd_solver, three_step_stochastic_quad_gd_solver, stochastic_get_z_bar, one_step_stochastic_quad_gd_solver
+
 from lah.algo_steps import create_eval_fn, create_train_fn, lin_sys_solve, create_kl_inv_layer, kl_inv_fn
 from lah.utils.nn_utils import (
-    calculate_pinsker_penalty,
-    # calculate_total_penalty,
-    get_perturbed_weights,
     init_network_params,
     init_variance_network_params,
-    predict_y,
-    compute_single_param_KL
+    predict_y
 )
 from jaxopt import Bisection
 
@@ -29,7 +25,7 @@ jax.config.update('jax_disable_jit', True)
 # jax.config.update("jax_debug_nans", True)
 
 
-class L2WSmodel(object):
+class L2Omodel(object):
     def __init__(self, 
                  train_unrolls=5,
                  step_varying_num=50,
@@ -111,8 +107,8 @@ class L2WSmodel(object):
     def setup_optimal_solutions(self, z_stars_train, z_stars_test, x_stars_train=None, 
                                 x_stars_test=None, y_stars_train=None, y_stars_test=None):
         if z_stars_train is not None:
-            self.z_stars_train = jnp.array(z_stars_train) # jnp.array(dict['z_stars_train'])
-            self.z_stars_test = jnp.array(z_stars_test) # jnp.array(dict['z_stars_test'])
+            self.z_stars_train = jnp.array(z_stars_train) 
+            self.z_stars_test = jnp.array(z_stars_test)
         else:
             self.z_stars_train, self.z_stars_test = None, None
 
@@ -327,15 +323,6 @@ class L2WSmodel(object):
     def init_params(self):
         # initialize weights of neural network
         self.mean_params = init_network_params(self.layer_sizes, random.PRNGKey(0))
-
-        # # initialize the stddev
-        # init_stddev_var = 1e-6
-        # self.sigma_params = init_variance_network_params(self.layer_sizes, self.init_var, 
-        #                                                  random.PRNGKey(1), 
-        #                                                 init_stddev_var)
-        
-        # # initialize the prior
-        # self.prior_param = jnp.log(self.init_var) * jnp.ones(2 * len(self.layer_sizes))
 
         self.params = [self.mean_params] #, self.sigma_params, self.prior_param]
 

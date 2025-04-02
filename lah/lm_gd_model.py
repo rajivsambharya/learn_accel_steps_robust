@@ -6,12 +6,12 @@ from jax import random
 import numpy as np
 
 from lah.algo_steps import k_steps_eval_lm_gd, k_steps_train_lm_gd, k_steps_eval_nesterov_gd
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from lah.lah_gd_model import sigmoid
 
 
-class LMGDmodel(L2WSmodel):
+class LMGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LMGDmodel, self).__init__(**kwargs)
 

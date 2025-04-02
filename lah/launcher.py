@@ -24,7 +24,6 @@ from lah.lm_ista_model import LMISTAmodel
 from lah.lah_gd_model import LAHGDmodel
 from lah.lah_gd_accel_model import LAHAccelGDmodel
 from lah.lah_logisticgd_accel_model import LAHAccelLOGISTICGDmodel
-from lah.lah_stoch_gd_model import LAHStochasticGDmodel
 from lah.lah_logisticgd_model import LAHLOGISTICGDmodel
 from lah.lah_scs_accel_model import LAHAccelSCSmodel
 from lah.lah_ista_model import LAHISTAmodel
@@ -61,7 +60,6 @@ from lah.osqp_model import OSQPmodel
 from lah.scs_model import SCSmodel
 from lah.utils.generic_utils import setup_permutation
 
-# config.update("jax_enable_x64", True)
 
 
 class Workspace:
@@ -181,8 +179,6 @@ class Workspace:
             self.create_ista_model(cfg, static_dict)
         elif algo == 'lah_gd':
             self.create_lah_gd_model(cfg, static_dict)
-        elif algo == 'lah_stochastic_gd':
-            self.create_lah_stochastic_gd_model(cfg, static_dict)
         elif algo == 'lah_logisticgd':
             self.create_lah_logisticgd_model(cfg, static_dict)
         elif algo == 'lah_accel_logisticgd':
@@ -331,32 +327,6 @@ class Workspace:
                                        nn_cfg=cfg.nn_cfg,
                                        pep_regularizer_coeff=cfg.get('pep_regularizer_coeff', None),
                                        pep_target=cfg.get('pep_target', None),
-                                       z_stars_train=self.z_stars_train,
-                                       z_stars_test=self.z_stars_test,
-                                       loss_method=cfg.loss_method,
-                                       algo_dict=input_dict)
-        
-    def create_lah_stochastic_gd_model(self, cfg, static_dict):
-        # get A, lambd, ista_step
-        P = static_dict['P']
-        gd_step = static_dict['gd_step']
-        gauss_mean = static_dict['gauss_mean']
-        gauss_var = static_dict['gauss_var']
-
-        input_dict = dict(algorithm='lah_stochastic_gd',
-                          c_mat_train=self.q_mat_train,
-                          c_mat_test=self.q_mat_test,
-                          gd_step=gd_step,
-                          P=P,
-                          gauss_mean=gauss_mean,
-                          gauss_var=gauss_var
-                          )
-        self.l2ws_model = LAHStochasticGDmodel(train_unrolls=self.train_unrolls,
-                                       eval_unrolls=self.eval_unrolls,
-                                       train_inputs=self.train_inputs,
-                                       test_inputs=self.test_inputs,
-                                       regression=cfg.supervised,
-                                       nn_cfg=cfg.nn_cfg,
                                        z_stars_train=self.z_stars_train,
                                        z_stars_test=self.z_stars_test,
                                        loss_method=cfg.loss_method,

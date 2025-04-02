@@ -16,10 +16,10 @@ from lah.algo_steps import (
     lin_sys_solve,
 )
 from lah.algo_steps_scs import k_steps_eval_lah_accel_scs, k_steps_train_lah_accel_scs
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 
 
-class LAHAccelSCSmodel(L2WSmodel):
+class LAHAccelSCSmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHAccelSCSmodel, self).__init__(**kwargs)
 

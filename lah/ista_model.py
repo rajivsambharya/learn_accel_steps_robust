@@ -4,10 +4,10 @@ from lah.algo_steps import (
     k_steps_eval_ista,
     k_steps_train_ista,
 )
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 
 
-class ISTAmodel(L2WSmodel):
+class ISTAmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(ISTAmodel, self).__init__(**kwargs)
 
@@ -27,4 +27,4 @@ class ISTAmodel(L2WSmodel):
         self.k_steps_eval_fn = partial(k_steps_eval_ista, A=A, lambd=lambd, 
                                        ista_step=ista_step, jit=self.jit)
         self.out_axes_length = 5
-        self.lasco = False
+        self.lah = False

@@ -16,13 +16,13 @@ from lah.algo_steps import (
     k_steps_train_lm_scs,
     lin_sys_solve,
 )
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import (
     predict_y
 )
 
 
-class LMSCSmodel(L2WSmodel):
+class LMSCSmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LMSCSmodel, self).__init__(**kwargs)
 

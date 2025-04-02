@@ -1,12 +1,12 @@
 from functools import partial
 
 from lah.algo_steps_logistic import k_steps_eval_logisticgd, k_steps_train_logisticgd
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 import jax.numpy as jnp
 import numpy as np
 
 
-class LOGISTICGDmodel(L2WSmodel):
+class LOGISTICGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LOGISTICGDmodel, self).__init__(**kwargs)
 
@@ -47,4 +47,4 @@ class LOGISTICGDmodel(L2WSmodel):
         self.k_steps_eval_fn = partial(k_steps_eval_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
         self.k_steps_train_fn = partial(k_steps_train_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
         self.out_axes_length = 5
-        self.lasco = False
+        self.lah = False

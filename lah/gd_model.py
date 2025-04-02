@@ -1,10 +1,10 @@
 from functools import partial
 
 from lah.algo_steps import k_steps_eval_gd, k_steps_train_gd
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 
 
-class GDmodel(L2WSmodel):
+class GDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(GDmodel, self).__init__(**kwargs)
 
@@ -22,4 +22,4 @@ class GDmodel(L2WSmodel):
         self.k_steps_train_fn = partial(k_steps_train_gd, P=P, gd_step=gd_step, jit=self.jit)
         self.k_steps_eval_fn = partial(k_steps_eval_gd, P=P, gd_step=gd_step, jit=self.jit)
         self.out_axes_length = 5
-        self.lasco = False
+        self.lah = False

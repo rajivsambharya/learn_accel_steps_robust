@@ -6,11 +6,11 @@ from jax import random, vmap
 import numpy as np
 
 from lah.algo_steps_logistic import k_steps_eval_lah_logisticgd, k_steps_train_lah_logisticgd, k_steps_eval_nesterov_logisticgd, compute_gradient
-from lah.l2ws_model import L2WSmodel
+from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
 
-class LAHLOGISTICGDmodel(L2WSmodel):
+class LAHLOGISTICGDmodel(L2Omodel):
     def __init__(self, **kwargs):
         super(LAHLOGISTICGDmodel, self).__init__(**kwargs)
 
