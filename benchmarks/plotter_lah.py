@@ -513,7 +513,7 @@ def plot_step_sizes(example, cfg):
         axes[1].set_xlabel('iterations')
         axes[2].set_xlabel('iterations')
         axes[0].set_title('Nesterov') #, color=colors[2])
-        axes[1].set_title(r'Some robustness: $\gamma =0.7$') #, color=colors[1])
+        axes[1].set_title(r'Some robustness: $\gamma =0.1$') #, color=colors[1])
         axes[2].set_title('No robustness') #, color=colors[1])
         axes[0].set_ylabel('step sizes')
         # axes[1, 0].set_ylabel('gain to cold start')
@@ -562,7 +562,7 @@ def plot_step_sizes(example, cfg):
         axes[1].set_xlabel('iterations')
         axes[2].set_xlabel('iterations')
         axes[0].set_title('Nesterov') #, color=colors[2])
-        axes[1].set_title(r'Some robustness: $\gamma =0.7$') #, color=colors[1])
+        axes[1].set_title(r'Some robustness: $\gamma =0.1$') #, color=colors[1])
         axes[2].set_title('No robustness') #, color=colors[1])
         axes[0].set_ylabel('momentum sizes')
         

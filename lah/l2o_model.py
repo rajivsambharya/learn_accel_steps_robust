@@ -21,7 +21,7 @@ from jaxopt import Bisection
 
 import jax
 jax.config.update("jax_enable_x64", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 # jax.config.update("jax_debug_nans", True)
 
 
@@ -444,9 +444,9 @@ class L2Omodel(object):
                 losses = batch_predict(params, inputs, b, iters, z_stars, key)
                 
                 # update so that we have pep
-                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
+                # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
                 if self.pep_regularizer_coeff is not None:
-                    return losses.mean() + self.pep_regularizer_coeff * (pep_loss - self.pep_target) ** 2
+                    return losses.mean() #+ self.pep_regularizer_coeff * (pep_loss - self.pep_target) ** 2
                 else:
                     return losses.mean()
             else:

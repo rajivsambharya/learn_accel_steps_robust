@@ -16,6 +16,7 @@ from cvxpylayers.jax import CvxpyLayer
 from PEPit import PEP
 from PEPit.functions import SmoothStronglyConvexFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
+from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
 
 
@@ -73,8 +74,8 @@ class LAHISTAmodel(L2Omodel):
          #20)
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(self.train_unrolls)
-        self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
-
+        # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
+        self.num_pep_iters = self.train_unrolls
 
         # e2e_loss_fn = self.create_end2end_loss_fn
 
@@ -630,8 +631,9 @@ class LAHISTAmodel(L2Omodel):
 
         # Declare a strongly convex smooth function and a convex function
         f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
-        h = problem.declare_function(ConvexIndicatorFunction)
-        # h = problem.declare_function(ConvexFunction)
+        # f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
+        # h = problem.declare_function(ConvexIndicatorFunction)
+        h = problem.declare_function(ConvexFunction)
         F = f + h
 
         # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)

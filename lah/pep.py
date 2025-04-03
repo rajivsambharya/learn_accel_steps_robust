@@ -7,6 +7,8 @@ from jax import grad, lax, vmap
 from jax.tree_util import tree_map
 from PEPit import PEP
 from PEPit.functions import SmoothStronglyConvexFunction
+from PEPit.operators import SymmetricLinearOperator
+from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 from cvxpylayers.jax import CvxpyLayer
 
@@ -49,6 +51,146 @@ def pepit_nesterov(mu, L, params):
 
     # Set the performance metric to the function value accuracy
     problem.set_performance_metric((f(y)) - fs)
+
+    # Solve the PEP
+    verbose = 1
+    pepit_verbose = max(verbose, 0)
+    try:
+        pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+    except Exception as e:
+        print('exception', e)
+        pepit_tau = 0
+
+    # Compute theoretical guarantee (for comparison)
+    n = num_iters
+    if mu == 0:
+        theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # tight, see [2], Table 1 (column 1, line 1)
+    else:
+        theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # not tight (bound for smooth convex functions)
+        # print('Warning: momentum is tuned for non-strongly convex functions.')
+
+    # Print conclusion if required
+    verbose = 1
+    if verbose != -1:
+        print('*** Example file:'
+            ' worst-case performance of the Accelerated Proximal Gradient Method in function values***')
+        print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
+        print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
+
+    # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
+    return pepit_tau, theoretical_tau
+
+
+
+def pepit_quad_accel_gd(mu, L, params):
+    """
+    params is an array of shape (num_iters, 2)
+    - the first column is the vector of step sizes
+    - the second column is the vector of momentum sizes
+    """
+    num_iters = params[:,0].size
+    step_sizes = params[:,0]
+    beta_vals = params[:,1]
+    
+    # Instantiate PEP
+    problem = PEP()
+
+    # Declare a strongly convex smooth function and a convex function
+    f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
+
+    # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
+    xs = f.stationary_point()
+    fs = f(xs)
+
+    # Then define the starting point x0
+    x0 = problem.set_initial_point()
+
+    # Set the initial constraint that is the distance between x0 and x^*
+    problem.set_initial_condition((x0 - xs) ** 2 <= 1)
+
+    # Compute n steps of the accelerated proximal gradient method starting from x0
+    x_new = x0
+    y = x0
+    for i in range(num_iters):
+        alpha = step_sizes[i]
+        beta = beta_vals[i]
+        x_old = x_new
+        x_new = y - alpha * f.gradient(y)
+        y = x_new + beta * (x_new - x_old)
+
+    # Set the performance metric to the function value accuracy
+    # problem.set_performance_metric((f(y)) - fs)
+    problem.set_performance_metric((y - xs)**2)
+
+    # Solve the PEP
+    verbose = 1
+    pepit_verbose = max(verbose, 0)
+    try:
+        pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+    except Exception as e:
+        print('exception', e)
+        pepit_tau = 0
+
+    # Compute theoretical guarantee (for comparison)
+    n = num_iters
+    if mu == 0:
+        theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # tight, see [2], Table 1 (column 1, line 1)
+    else:
+        theoretical_tau = 2 * L / (n ** 2 + 5 * n + 2)  # not tight (bound for smooth convex functions)
+        # print('Warning: momentum is tuned for non-strongly convex functions.')
+
+    # Print conclusion if required
+    verbose = 1
+    if verbose != -1:
+        print('*** Example file:'
+            ' worst-case performance of the Accelerated Proximal Gradient Method in function values***')
+        print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
+        print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
+
+    # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
+    return pepit_tau, theoretical_tau
+
+
+
+def pepit_quadprox_accel_gd(mu, L, params):
+    """
+    params is an array of shape (num_iters, 2)
+    - the first column is the vector of step sizes
+    - the second column is the vector of momentum sizes
+    """
+    num_iters = params[:,0].size
+    step_sizes = params[:,0]
+    beta_vals = params[:,1]
+    
+    # Instantiate PEP
+    problem = PEP()
+
+    # Declare a strongly convex smooth function and a convex function
+    f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
+
+    # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
+    xs = f.stationary_point()
+    fs = f(xs)
+
+    # Then define the starting point x0
+    x0 = problem.set_initial_point()
+
+    # Set the initial constraint that is the distance between x0 and x^*
+    problem.set_initial_condition((x0 - xs) ** 2 <= 1)
+
+    # Compute n steps of the accelerated proximal gradient method starting from x0
+    x_new = x0
+    y = x0
+    for i in range(num_iters):
+        alpha = step_sizes[i]
+        beta = beta_vals[i]
+        x_old = x_new
+        x_new = proximal_step(y - alpha * f.gradient(y), f2, alpha)
+        y = x_new + beta * (x_new - x_old)
+
+    # Set the performance metric to the function value accuracy
+    problem.set_performance_metric((f(y)) - fs)
+    # problem.set_performance_metric((y - xs)**2)
 
     # Solve the PEP
     verbose = 1

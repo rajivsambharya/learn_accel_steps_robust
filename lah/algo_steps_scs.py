@@ -33,27 +33,27 @@ def k_steps_eval_lah_accel_scs(k, z0, q, params, proj, P, A, idx_mapping, superv
     # import pdb
     # pdb.set_trace()
 
-    if hsde:
-        # first step: iteration 0
-        # we set homogeneous = False for the first iteration
-        #   to match the SCS code which has the global variable FEASIBLE_ITERS
-        #   which is set to 1
-        homogeneous = False
+    # if hsde:
+    #     # first step: iteration 0
+    #     # we set homogeneous = False for the first iteration
+    #     #   to match the SCS code which has the global variable FEASIBLE_ITERS
+    #     #   which is set to 1
+    #     homogeneous = False
 
-        z_next, u, u_tilde, v = fixed_point_hsde_peaceman(
-            z0, homogeneous, q, factors1[0, :, :], factors2[0, :], proj, scaled_vecs[0, :], alphas[0], tau_factors[0], verbose=verbose)
-        all_z = all_z.at[1, :].set(z_next)
-        all_u = all_u.at[1, :].set(u)
-        all_v = all_v.at[1, :].set(v)
-        iter_losses = iter_losses.at[0].set(jnp.linalg.norm(z_next - z0))
-        dist_opts = dist_opts.at[0].set(jnp.linalg.norm((z0[:-1] - z_star)))
+    #     z_next, u, u_tilde, v = fixed_point_hsde_peaceman(
+    #         z0, homogeneous, q, factors1[0, :, :], factors2[0, :], proj, scaled_vecs[0, :], alphas[0], tau_factors[0], verbose=verbose)
+    #     all_z = all_z.at[1, :].set(z_next)
+    #     all_u = all_u.at[1, :].set(u)
+    #     all_v = all_v.at[1, :].set(v)
+    #     iter_losses = iter_losses.at[0].set(jnp.linalg.norm(z_next - z0))
+    #     dist_opts = dist_opts.at[0].set(jnp.linalg.norm((z0[:-1] - z_star)))
 
-        x, y, s = extract_sol(u, v, n, False)
-        pr = jnp.linalg.norm(A @ x + s - q[n:])
-        dr = jnp.linalg.norm(A.T @ y + P @ x + q[:n])
-        primal_residuals = primal_residuals.at[0].set(pr)
-        dual_residuals = dual_residuals.at[0].set(dr)
-        z0 = z_next
+    #     x, y, s = extract_sol(u, v, n, False)
+    #     pr = jnp.linalg.norm(A @ x + s - q[n:])
+    #     dr = jnp.linalg.norm(A.T @ y + P @ x + q[:n])
+    #     primal_residuals = primal_residuals.at[0].set(pr)
+    #     dual_residuals = dual_residuals.at[0].set(dr)
+    #     z0 = z_next
 
     fp_eval_partial = partial(fp_eval_lah_accel_scs, q_r=q, z_star=z_star, all_factors=all_factors,
                               proj=proj, P=P, A=A, idx_mapping=idx_mapping,
@@ -62,7 +62,8 @@ def k_steps_eval_lah_accel_scs(k, z0, q, params, proj, P, A, idx_mapping, superv
                               custom_loss=custom_loss,
                               verbose=verbose)
     val = z0, z0, iter_losses, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
-    start_iter = 1 if hsde else 0
+    # start_iter = 1 if hsde else 0
+    start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
     else:
@@ -88,7 +89,15 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     z_peaceman, u, u_tilde, v = fixed_point_hsde_peaceman(
         z, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx],
         verbose=verbose)
-    z_next = alphas[idx] * 0 + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
+    z0 = 0 * z_peaceman
+    z0 = z0.at[-1].set(1)
+    z_next = alphas[idx] * z0 + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
+    # alpha = 1 / (i+2)
+    
+    # z_next =  alpha * z0 + (1-alpha) * z_peaceman
+    # z_next = z_peaceman
+    # import pdb
+    # pdb.set_trace()
     
     dist_opt = jnp.linalg.norm(z[:-1] / z[-1] - z_star)
     diff = jnp.linalg.norm(z_next / z_next[-1] - z / z[-1])
@@ -126,19 +135,20 @@ def k_steps_train_lah_accel_scs(k, z0, q, params, P, A, idx_mapping, supervised,
                                z_star=z_star, proj=proj, hsde=hsde,
                                homogeneous=True, scaled_vecs=scaled_vecs, alphas=alphas, betas=betas,
                                tau_factors=tau_factors)
-    if hsde:
-        # first step: iteration 0
-        # we set homogeneous = False for the first iteration
-        #   to match the SCS code which has the global variable FEASIBLE_ITERS
-        #   which is set to 1
-        homogeneous = False
-        z_next, u, u_tilde, v = fixed_point_hsde_peaceman(
-            z0, homogeneous, q, factors1[0, :, :], 
-            factors2[0, :], proj, scaled_vecs[0, :], alphas[0], tau_factors[0])
-        iter_losses = iter_losses.at[0].set(jnp.linalg.norm(z_next - z0))
-        z0 = z_next
+    # if hsde:
+    #     # first step: iteration 0
+    #     # we set homogeneous = False for the first iteration
+    #     #   to match the SCS code which has the global variable FEASIBLE_ITERS
+    #     #   which is set to 1
+    #     homogeneous = False
+    #     z_next, u, u_tilde, v = fixed_point_hsde_peaceman(
+    #         z0, homogeneous, q, factors1[0, :, :], 
+    #         factors2[0, :], proj, scaled_vecs[0, :], alphas[0], tau_factors[0])
+    #     iter_losses = iter_losses.at[0].set(jnp.linalg.norm(z_next - z0))
+    #     z0 = z_next
     val = z0, iter_losses
-    start_iter = 1 if hsde else 0
+    # start_iter = 1 if hsde else 0
+    start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_train_partial, val)
     else:

@@ -56,7 +56,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
         e2e_loss_fn = self.create_end2end_loss_fn
         
-        self.num_pep_iters = 20
+        self.num_pep_iters = self.train_unrolls
 
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
@@ -172,6 +172,10 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                 else:
                     # for step-varying training
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
+                    
+                    # stochastic_params = stochastic_params.at[:20,0].set(1/self.smooth_param)
+                    # beta = jnp.array([t / (t+3) for t in range(20)])
+                    # stochastic_params = stochastic_params.at[:20,1].set(beta)
             else:
                 if special_algo == 'silver':
                     stochastic_params = params[0]
