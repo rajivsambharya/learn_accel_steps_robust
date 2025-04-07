@@ -9,7 +9,7 @@ data:
   datetime: ''
 
 step_varying_num: 100
-train_unrolls: 30
+train_unrolls: 20
 eval_unrolls: 100
 eval_every_x_epochs: 20 #00
 save_every_x_epochs: 1
@@ -27,7 +27,7 @@ normalize_inputs: False #True
 supervised: True
 
 pep_regularizer_coeff: 10
-pep_target: 0.1
+pep_target: 0.25
 
 
 accuracies: [.1, .01, .001, .0001]

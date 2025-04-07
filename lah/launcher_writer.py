@@ -54,6 +54,19 @@ def update_percentiles(percentiles_df_list, percentiles, losses, train, col):
     return percentiles_df_list
 
 
+# def write_pep(pep_df, filename, pep_val):
+#     # Append a new row with pep_val. Assumes a single column named 'pep_val'.
+#     pep_df = pep_df.append({'pep_val': pep_val}, ignore_index=True)
+#     pep_df.to_csv(filename, index=False)
+#     return pep_df
+
+def write_pep(pep_df, filename, col, pep_val):
+    new_row = pd.DataFrame([{'col': col, 'pep_val': pep_val}])
+    pep_df = pd.concat([pep_df, new_row], ignore_index=True)
+    pep_df.to_csv(filename, index=False)
+    return pep_df
+
+
 def write_accuracies_csv(accs, losses, train, col, no_learning_accs, pr_dr_max=False):
     df_acc = pd.DataFrame()
     df_acc['accuracies'] = np.array(accs)

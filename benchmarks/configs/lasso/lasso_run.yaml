@@ -1,6 +1,6 @@
 model: lasco
 nn_cfg:
-  lr: 1e-2
+  lr: 1e-1
   method: adam
   batch_size: 1000
   epochs: 2000

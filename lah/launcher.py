@@ -55,6 +55,7 @@ from lah.launcher_writer import (
     update_percentiles,
     write_accuracies_csv,
     write_train_results,
+    write_pep
 )
 from lah.osqp_model import OSQPmodel
 from lah.scs_model import SCSmodel
@@ -905,6 +906,8 @@ class Workspace:
             self.test_logf, fieldnames=fieldnames)
         if os.stat('train_results.csv').st_size == 0:
             self.test_writer.writeheader()
+            
+        self.pep_filename = 'pep_results.csv'
 
     def evaluate_iters(self, num, col, train=False, plot=True, plot_pretrain=False):
         if train and col == 'prev_sol':
@@ -1323,12 +1326,18 @@ class Workspace:
 
     def eval_iters_train_and_test(self, col, new_start_index):
         try:
-            # pep_loss2 = self.l2ws_model.pep_clarabel(np.array(jnp.exp(self.l2ws_model.params[0][:self.train_unrolls,:])))
-            pep_loss3  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
-            # print('PEPLOSS2', pep_loss2)
-            print('PEPLOSS3', pep_loss3)
+            pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+            print('PEPLOSS', pep_loss)
+            
+            # now save the result
+            try:
+                pep_df = pd.read_csv(self.pep_filename)
+            except FileNotFoundError:
+                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
+            write_pep(pep_df, self.pep_filename, col, pep_loss)
         except Exception as e:
-            print('excpetion', e)
+            print('exception', e)
+            write_pep(pep_df, self.pep_filename, col, 99999)
         
         self.evaluate_iters(
             self.num_samples_test, col, train=False)

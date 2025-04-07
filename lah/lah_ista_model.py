@@ -541,7 +541,9 @@ class LAHISTAmodel(L2Omodel):
                     stochastic_params = 2 / self.smooth_param * sigmoid(params[0][:n_iters, 0])
                 else:
                     # for step-varying training
+                    # params[0] = params[0].at[-1,0].set()
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
+                    stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
             else:
                 if special_algo == 'silver' or special_algo == 'conj_grad':
                     stochastic_params = params[0]

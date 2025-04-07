@@ -58,7 +58,7 @@ def k_steps_eval_lah_accel_scs(k, z0, q, params, proj, P, A, idx_mapping, superv
     fp_eval_partial = partial(fp_eval_lah_accel_scs, q_r=q, z_star=z_star, all_factors=all_factors,
                               proj=proj, P=P, A=A, idx_mapping=idx_mapping,
                               c=None, b=None, hsde=hsde,
-                              homogeneous=True, scaled_vecs=scaled_vecs, alphas=alphas, betas=betas, tau_factors=tau_factors,
+                              homogeneous=False, scaled_vecs=scaled_vecs, alphas=alphas, betas=betas, tau_factors=tau_factors,
                               custom_loss=custom_loss,
                               verbose=verbose)
     val = z0, z0, iter_losses, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
@@ -86,12 +86,14 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     r = q_r
     factors1, factors2 = all_factors
     idx = idx_mapping[i]
-    z_peaceman, u, u_tilde, v = fixed_point_hsde_peaceman(
-        z, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx],
+    z_next, u, u_tilde, v = fixed_point_hsde(
+        z, z_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx],
         verbose=verbose)
-    z0 = 0 * z_peaceman
-    z0 = z0.at[-1].set(1)
-    z_next = alphas[idx] * z0 + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
+    # z0 = 0 * z_peaceman
+    # z0 = z0.at[-1].set(1)
+    # import pdb
+    # pdb.set_trace()
+    # z_next = z_dr + betas[idx] * (z_dr - z_prev)
     # alpha = 1 / (i+2)
     
     # z_next =  alpha * z0 + (1-alpha) * z_peaceman
@@ -116,7 +118,7 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     all_z = all_z.at[i, :].set(z_next)
     all_u = all_u.at[i, :].set(u)
     all_v = all_v.at[i, :].set(v)
-    return z_next, z_prev, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
+    return z_next, z, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
 
 
 
@@ -133,7 +135,7 @@ def k_steps_train_lah_accel_scs(k, z0, q, params, P, A, idx_mapping, supervised,
     fp_train_partial = partial(fp_train_lah_accel_scs, q_r=q, all_factors=all_factors,
                                supervised=supervised, P=P, A=A, idx_mapping=idx_mapping,
                                z_star=z_star, proj=proj, hsde=hsde,
-                               homogeneous=True, scaled_vecs=scaled_vecs, alphas=alphas, betas=betas,
+                               homogeneous=False, scaled_vecs=scaled_vecs, alphas=alphas, betas=betas,
                                tau_factors=tau_factors)
     # if hsde:
     #     # first step: iteration 0
@@ -146,14 +148,14 @@ def k_steps_train_lah_accel_scs(k, z0, q, params, P, A, idx_mapping, supervised,
     #         factors2[0, :], proj, scaled_vecs[0, :], alphas[0], tau_factors[0])
     #     iter_losses = iter_losses.at[0].set(jnp.linalg.norm(z_next - z0))
     #     z0 = z_next
-    val = z0, iter_losses
+    val = z0, z0, iter_losses
     # start_iter = 1 if hsde else 0
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_train_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_train_partial, val)
-    z_final, iter_losses = out
+    z_final, z_prev_final, iter_losses = out
     return z_final, iter_losses
 
 
@@ -163,14 +165,17 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     q_r = r if hsde else q_r = q
     homogeneous tells us if we set tau = 1.0 or use the root_plus method
     """
-    z, loss_vec = val
+    z, z_prev, loss_vec = val
     r = q_r
     factors1, factors2 = all_factors
     idx = idx_mapping[i]
 
-    z_peaceman, u, u_tilde, v = fixed_point_hsde_peaceman(z, homogeneous, r, factors1[idx, :, :], 
-                                             factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx])
-    z_next = alphas[idx] * 0 + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
+    # z_peaceman, u, u_tilde, v = fixed_point_hsde_peaceman(z, homogeneous, r, factors1[idx, :, :], 
+    #                                          factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx])
+    # z_next = alphas[idx] * z_prev + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
+    
+    z_next, u, u_tilde, v = fixed_point_hsde(
+        z, z_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx])
     
     # add acceleration
     # z_next = (1 - betas[i, 0]) * z_next + betas[i, 0] * z
@@ -180,12 +185,13 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
         # x, y, s = extract_sol(u, v, n, hsde)
         # pr = jnp.linalg.norm(A @ x + s - q_r[n:])
         # dr = jnp.linalg.norm(A.T @ y + P @ x + q_r[:n])
-        diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z_star)
+        # diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z_star)
+        diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z[:-1] / z[-1])
         # diff = jnp.linalg.norm(z_next[:-1] - z_star) # / z[-1] - z_star)
     else:
         diff = 0 #jnp.linalg.norm(z_next / z_next[-1] - z / z[-1])
     loss_vec = loss_vec.at[i].set(diff)
-    return z_next, loss_vec
+    return z_next, z, loss_vec
 
 
 
@@ -552,3 +558,91 @@ def extract_sol(u, v, n, hsde):
 # provides vmapped versions of the projections for the soc and psd cones
 soc_proj_single_batch = vmap(soc_proj_single, in_axes=(0), out_axes=(0))
 sdp_proj_batch = vmap(sdp_proj_single, in_axes=(0, None), out_axes=(0))
+
+
+def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, scale_vec, alpha, beta, lah=True, verbose=False):
+    """
+    implements 1 iteration of algorithm 5.1 in https://arxiv.org/pdf/2004.02177.pdf
+
+    the names of the variables are a bit different compared with that paper
+
+    we have
+    u_tilde = (w_tilde, tau_tilde)
+    u = (w, tau)
+    z = (mu, eta)
+
+    they have
+    u_tilde = (z_tilde, tau_tilde)
+    u = (z, tau)
+    w = (mu, eta)
+
+    tau_tilde, tau, eta are all scalars
+    w_tilde, w, mu all have size (m + n)
+
+    r = (I + M)^{-1} q
+    requires the inital eta > 0
+
+    if homogeneous, we normalize z s.t. ||z|| = sqrt(m + n + 1)
+        and we do the root_plus calculation for tau_tilde
+    else
+        no normalization
+        tau_tilde = 1 (bias towards feasibility)
+    """
+    tau_factor = 1
+    # homogeneous = False
+    if homogeneous:
+        z_init = z_init / jnp.linalg.norm(z_init) * jnp.sqrt(z_init.size)
+
+    # z = (mu, eta)
+    mu, eta = z_init[:-1], z_init[-1]
+
+    # u_tilde, tau_tilde update
+
+    # non identity DR scaling
+    rhs = jnp.multiply(scale_vec, mu)
+    factor = (factor1, factor2)
+    p = lin_sys_solve(factor, rhs)
+
+    if lah:
+        r = lin_sys_solve(factor, r)
+
+    # non identity DR scaling
+    # p = jnp.multiply(scale_vec, p)
+    if homogeneous:
+        tau_tilde = root_plus(mu, eta, p, r, scale_vec, tau_factor)
+    else:
+        tau_tilde = 1.0
+    w_tilde = p - r * tau_tilde
+    # check_for_nans(w_tilde)
+
+    # u, tau update
+    w_temp = 2 * w_tilde - mu
+    w = proj(w_temp)
+    tau = jnp.clip(2 * tau_tilde - eta, a_min=0)
+
+    # mu, eta update
+    mu = mu + alpha * (w - w_tilde)
+    eta = 1 #eta + alpha * (tau - tau_tilde)
+
+    # concatenate for z, u
+    z = jnp.concatenate([mu, jnp.array([eta])])
+    u = jnp.concatenate([w, jnp.array([tau])])
+    u_tilde = jnp.concatenate([w_tilde, jnp.array([tau_tilde])])
+    
+    beta = 0
+    z = z + beta * (z - z_prev)
+
+    # for s extraction - not needed for algorithm
+    full_scaled_vec = jnp.concatenate([scale_vec, jnp.array([tau_factor])])
+    v = jnp.multiply(full_scaled_vec,  u + z_init - 2 * u_tilde)
+
+    # z and u have size (m + n + 1)
+    # v has shape (m + n)
+    if verbose:
+        print('pre-solve u_tilde', rhs)
+        print('u_tilde', u_tilde)
+        print('u', u)
+        print('z', z)
+    # import pdb
+    # pdb.set_trace()
+    return z, u, u_tilde, v

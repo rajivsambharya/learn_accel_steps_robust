@@ -78,7 +78,7 @@ def pepit_nesterov(mu, L, params):
         print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
 
     # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
-    return pepit_tau, theoretical_tau
+    return pepit_tau
 
 
 
@@ -167,6 +167,7 @@ def pepit_quadprox_accel_gd(mu, L, params):
 
     # Declare a strongly convex smooth function and a convex function
     f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
+    f2 
 
     # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
     xs = f.stationary_point()
