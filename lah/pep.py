@@ -333,3 +333,27 @@ def build_A_matrix_with_xstar(alpha_list, beta_list):
     A = A.at[k + 1, idx_xstar].set(1.0)
 
     return A
+
+
+def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
+    """
+    TODO: generalize create_nesterov_pep_sdp_layer but for the strongly convex case
+    """
+    pass
+
+
+def create_quadmin_pep_sdp_layer(mu, L, num_iters):
+    """
+    TODO: create cvxpylayer for quadratic min: min_z (1/2) z^T Q z 
+    result will be in terms of distance to optimality
+    """
+    pass
+
+def create_proxgd_pep_sdp_layer(mu, L, num_iters):
+    """
+    TODO: create cvxpylayer for quadratic min: min_z f(z) + g(z)
+    where f is mu strongly convex and L smooth (mu = 0 is possible)
+    g is convex
+    bound in terms of function values
+    """
+    pass
