@@ -11,7 +11,7 @@ from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
 from functools import reduce
-from lah.pep import build_A_matrix_with_yk_and_xstar, create_nesterov_pep_sdp_layer, pepit_quad_accel_gd
+from lah.pep import build_A_matrix_with_xstar, create_nesterov_pep_sdp_layer, pepit_quad_accel_gd
 
 
 class LAHAccelGDmodel(L2Omodel):

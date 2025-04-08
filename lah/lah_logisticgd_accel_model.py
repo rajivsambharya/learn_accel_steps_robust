@@ -11,7 +11,7 @@ from PEPit.functions import SmoothStronglyConvexFunction
 import cvxpy as cp
 from cvxpylayers.jax import CvxpyLayer
 from jax import lax
-from lah.pep import create_nesterov_pep_sdp_layer, build_A_matrix_with_yk_and_xstar, pepit_nesterov
+from lah.pep import create_nesterov_pep_sdp_layer, build_A_matrix_with_xstar, pepit_nesterov
 
 
 class LAHAccelLOGISTICGDmodel(L2Omodel):
@@ -66,7 +66,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
         self.num_points = num_points
         
-        # self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
         
         
     def pepit_nesterov_check(self, params):
@@ -152,10 +152,10 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         step_sizes = params[:self.num_pep_iters,0]
         momentum_sizes = params[:self.num_pep_iters,1]
         
-        A_param = build_A_matrix_with_yk_and_xstar(step_sizes, momentum_sizes)
+        A_param = build_A_matrix_with_xstar(step_sizes, momentum_sizes)
         G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True})
 
-        return H[-3] - H[-1]
+        return H[-2] - H[-1]
 
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required, special_algo='gd'):

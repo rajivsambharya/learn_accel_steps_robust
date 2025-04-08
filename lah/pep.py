@@ -224,20 +224,20 @@ def pepit_quadprox_accel_gd(mu, L, params):
 
 def create_nesterov_pep_sdp_layer(L, num_iters):
     """
-    ordering: x*, x_0,...,x_{p-1}, s*,s_0,..,s_{p-1}
+    creates the cvxpylayer for nesterovs method for the non-strongly convex case
     """
     k = num_iters
-    A = cp.Parameter((k+3, k+3))
+    A = cp.Parameter((k+2, k+3))
     
     # Define Gram matrix G and function values F
     G = cp.Variable((k + 3, k + 3), PSD=True)  # Gram of [x0, x*, g0, ..., g_{k-1}, g_f]
-    F = cp.Variable(k + 3)  # f(x_0), ..., f(x_k), f(y_k), f(x_*)
+    F = cp.Variable(k + 2)  # f(x_0), ..., f(x_k), f(x_*)
 
     constraints = []
 
     # Interpolation constraints: for i,j in {0, ..., k}, plus g_f
-    for i in range(k + 3):  # includes x_0,...,x_k, y_k, x^*
-        for j in range(k + 3):
+    for i in range(k + 2):  # includes x_0,...,x_k, y_k, x^*
+        for j in range(k + 2):
             if i != j:
                 Ai = A[i]
                 Aj = A[j]
@@ -246,8 +246,6 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
                 def grad_idx(idx):
                     if idx <= k: # - 1:
                         return 2 + idx         # g_0 to g_{k-1}
-                    elif idx == k + 1: #idx == k or idx == k + 1:
-                        return 2 + k           # g_f (for x_k and y_k)
                     else:  # x^* has zero gradient
                         return None
 
@@ -286,7 +284,7 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
     constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
 
     # Objective: maximize worst-case f(x_k) - f(x^*)
-    objective = cp.Maximize(F[-3] - F[-1])  # A[-1] is x^*
+    objective = cp.Maximize(F[-2] - F[-1])  # A[-1] is x^*
     prob = cp.Problem(objective, constraints)
     
     cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
@@ -294,20 +292,19 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
     return cvxpylayer
 
 
-def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
+def build_A_matrix_with_xstar(alpha_list, beta_list):
     """
-    JAX-friendly version of build_A_matrix_with_yk_and_xstar.
+    JAX-friendly version
 
     Returns A: jnp.ndarray of shape (k+3, k+3), where rows are:
     - A[0] to A[k]: x_0 to x_k
-    - A[k+1]: y_k
-    - A[k+2]: x_star
+    - A[k+1]: x_star
 
-    Basis: [x_0, x_star, g_0, ..., g_{k-1}, g_f]
+    Basis: [x_0, x_star, g_0, ..., g_{k-1}, g_k]
     """
     k = alpha_list.shape[0]
-    n_basis = k + 3  # [x0, x*, g_0, ..., g_{k-1}, g_f]
-    A0 = jnp.zeros((k + 3, n_basis))
+    n_basis = k + 3  # [x0, x*, g_0, ..., g_{k-1}, g_k]
+    A0 = jnp.zeros((k + 2, n_basis))
 
     idx_x0 = 0
     idx_xstar = 1
@@ -332,14 +329,7 @@ def build_A_matrix_with_yk_and_xstar(alpha_list, beta_list):
 
     A = lax.fori_loop(0, k, body, A0)
 
-    # y_k = (1 + beta_k) * x_k - beta_k * x_{k-1}
-    x_k = A[k]
-    x_km1 = A[k - 1] if k >= 1 else A[0]
-    beta_k = beta_list[k - 1]
-    y_k = (1 + beta_k) * x_k - beta_k * x_km1
-    A = A.at[k + 1].set(y_k)
-
     # x_star
-    A = A.at[k + 2, idx_xstar].set(1.0)
+    A = A.at[k + 1, idx_xstar].set(1.0)
 
     return A
