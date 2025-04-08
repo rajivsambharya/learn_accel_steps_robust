@@ -29,7 +29,8 @@ dependencies = [
     "networkx",
     "pepit",
     "jaxopt",
-    "cvxpylayers"
+    "cvxpylayers",
+    "mosek"
 ]
 
 [tool.setuptools.packages.find]
