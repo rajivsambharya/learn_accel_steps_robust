@@ -167,7 +167,7 @@ def pepit_quadprox_accel_gd(mu, L, params):
 
     # Declare a strongly convex smooth function and a convex function
     f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
-    f2 
+    
 
     # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
     xs = f.stationary_point()

@@ -66,7 +66,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
         self.num_points = num_points
         
-        self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        # self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
         
         
     def pepit_nesterov_check(self, params):
@@ -176,6 +176,8 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                     # stochastic_params = stochastic_params.at[:20,0].set(1/self.smooth_param)
                     # beta = jnp.array([t / (t+3) for t in range(20)])
                     # stochastic_params = stochastic_params.at[:20,1].set(beta)
+                    stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
+                    stochastic_params = stochastic_params.at[-1,1].set(.9)
             else:
                 if special_algo == 'silver':
                     stochastic_params = params[0]

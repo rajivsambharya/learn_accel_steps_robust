@@ -293,7 +293,7 @@ def ista_setup_script(b_mat, A, lambd, output_filename):
     for i in range(N):
         print('solving problem', i)
         b_param.value = np.array(b_mat[i, :])
-        prob.solve(verbose=True, eps_abs=1e-9, eps_rel=1e-9)
+        prob.solve(verbose=True, solver=cp.CLARABEL) #, eps_abs=1e-9, eps_rel=1e-9)
         objvals = objvals.at[i].set(prob.value)
         z_stars = z_stars.at[i, :].set(jnp.array(z.value))
         solve_times[i] = prob.solver_stats.solve_time
@@ -329,6 +329,7 @@ def ista_setup_script(b_mat, A, lambd, output_filename):
         plt.plot(b_mat[i, :])
     plt.savefig("thetas.pdf")
     plt.clf()
+    return z_stars
 
 
 def gd_setup_script(c_mat, P, theta_mat, output_filename):

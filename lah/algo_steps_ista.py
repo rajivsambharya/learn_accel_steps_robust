@@ -280,11 +280,11 @@ def fp_train_fista(i, val, supervised, z_star, A, b, lambd, ista_step):
 def fp_eval_fista(i, val, supervised, z_star, A, b, lambd, ista_step):
     z, y, t, loss_vec, obj_diffs, z_all = val
     z_next, y_next, t_next = fixed_point_fista(z, y, t, A, b, lambd, ista_step[i])
-    if supervised:
-        diff = 10 * jnp.log10(jnp.linalg.norm(z - z_star) ** 2 / jnp.linalg.norm(z_star) ** 2)
-        # diff = jnp.linalg.norm(z - z_star)
-    else:
-        diff = jnp.linalg.norm(z_next - z)
+    # if supervised:
+    #     diff = 10 * jnp.log10(jnp.linalg.norm(z - z_star) ** 2 / jnp.linalg.norm(z_star) ** 2)
+    #     # diff = jnp.linalg.norm(z - z_star)
+    # else:
+    diff = jnp.linalg.norm(z_next - z)
     loss_vec = loss_vec.at[i].set(diff)
 
     obj = .5 * jnp.linalg.norm(A @ z - b) ** 2 + lambd * jnp.linalg.norm(z, ord=1)

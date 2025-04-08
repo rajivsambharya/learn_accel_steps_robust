@@ -770,7 +770,7 @@ class Workspace:
             self.z_stars_train = z_stars_train
 
             # val
-            self.z_stars_val = z_stars[self.val_indices, :]
+            # self.z_stars_val = z_stars[self.val_indices, :]
         else:
             opt_train_sols, opt_test_sols, opt_val_sols, self.m, self.n = setup_scs_opt_sols(jnp_load_obj, self.train_indices, self.test_indices, self.val_indices)
             self.x_stars_train, self.y_stars_train, self.z_stars_train = opt_train_sols
@@ -999,7 +999,7 @@ class Workspace:
         else:
             z_plot = z_all
 
-        # plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
+        plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
 
         if self.l2ws_model.algo[:3] == 'lah':
             n_iters = 64 if col == 'silver' else self.l2ws_model.step_varying_num + 1 #51
@@ -1337,6 +1337,10 @@ class Workspace:
             write_pep(pep_df, self.pep_filename, col, pep_loss)
         except Exception as e:
             print('exception', e)
+            try:
+                pep_df = pd.read_csv(self.pep_filename)
+            except FileNotFoundError:
+                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
             write_pep(pep_df, self.pep_filename, col, 99999)
         
         self.evaluate_iters(

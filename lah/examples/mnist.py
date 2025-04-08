@@ -18,6 +18,7 @@ from PIL import Image
 from functools import partial
 from scipy.spatial import distance_matrix
 import pandas as pd
+from lah.examples.solve_script import ista_setup_script
 
 
 def run(run_cfg, model='lah'):
@@ -48,42 +49,43 @@ def run(run_cfg, model='lah'):
     B = vectorized2DBlurMatrix(img_size, img_size, blur_size)
 
     # # get P, A
-    if deblur_or_denoise == 'deblur':
-        P = B.T @ B * setup_cfg.get('obj_const', 1)
-        m, n = img_size * img_size, img_size * img_size
-        A = np.eye(n)
-        A = setup_cfg.get('A_scale', 1) * A
+    # P = B.T @ B * setup_cfg.get('obj_const', 1)
+    # m, n = img_size * img_size, img_size * img_size
+    # A = np.eye(n)
+    # A = setup_cfg.get('A_scale', 1) * Ax
 
-        rho_vec, sigma = jnp.ones(m), 1
-        # rho_vec = rho_vec.at[l == u].set(1000)
-    else:
-        # new
-        P, A, prob, img_param, num_eq = mnist_canon(B, setup_cfg['lambd'])
-        m, n = A.shape
-        rho_vec = jnp.ones(m)
-        rho_vec = rho_vec.at[:num_eq].set(1000)
+    # rho_vec, sigma = jnp.ones(m), 1
+    # rho_vec = rho_vec.at[l == u].set(1000)
 
-    sigma = 1
-    M = P + sigma * jnp.eye(n) + A.T @ jnp.diag(rho_vec) @ A
-    factor = jsp.linalg.lu_factor(M)
+    # sigma = 1
+    # M = P + sigma * jnp.eye(n) + A.T @ jnp.diag(rho_vec) @ A
+    # factor = jsp.linalg.lu_factor(M)
 
-    m, n = A.shape
-    static_dict = dict(factor=factor, P=P, A=A, rho=rho_vec)
+    # m, n = A.shape
+    # static_dict = dict(factor=factor, P=P, A=A, rho=rho_vec)
+    evals, evecs = jnp.linalg.eigh(B.T @ B)
+    ista_step =  1 / evals.max()
+    static_dict = dict(A=jnp.array(B), lambd=lambd, ista_step=ista_step)
 
     # we directly save q now
     static_flag = True
+    # if model == 'lah':
+    #     algo = 'lah_osqp'
+    # elif model == 'l2ws':
+    #     algo = 'osqp'
+    # elif model == 'lm':
+    #     algo = 'lm_osqp'
     if model == 'lah':
-        algo = 'lah_osqp'
+        algo = 'lah_ista'
     elif model == 'l2ws':
-        algo = 'osqp'
+        algo = 'ista'
     elif model == 'lm':
-        algo = 'lm_osqp'
+        algo = 'lm_ista'
     deblur_or_denoise = setup_cfg['deblur_or_denoise']
     
-    vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
-    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, 
-                          custom_loss=nmse_decibel,#image_deblurring_loss,
-                          custom_visualize_fn=vis_fn)
+    # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
+    # workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, custom_visualize_fn=vis_fn)
+    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
 
     # run the workspace
     workspace.run()
@@ -160,8 +162,9 @@ def setup_probs(setup_cfg):
             q_mat = q_mat.at[i, :n].set((-B.T @ blurred_img_vec + lambd) * obj_const)
             theta_mat = theta_mat.at[i, :].set(blurred_img_vec)
             # blurred_imgs.append(blurred_img)
-
-    z_stars = direct_osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None)
+            
+    z_stars = ista_setup_script(theta_mat, B, lambd, output_filename)
+    # z_stars = direct_osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None)
     
     if not os.path.exists('images'):
         os.mkdir('images')
@@ -173,15 +176,15 @@ def setup_probs(setup_cfg):
         axarr[0].imshow(blurred_img, cmap=plt.get_cmap('gray'), label='blurred')
         axarr[0].set_title('blurred')
 
-        # sol_img = np.reshape(z_stars[i, :784], (28,28))
+        sol_img = np.reshape(z_stars[i, :784], (28,28))
         # sol_img = np.reshape(z_stars[i, 1458:1458 + 784], (28,28))
-        if dataset == 'mri':
-            sol_img = np.reshape(z_stars[i, :img_size * img_size], (img_size, img_size))
-        else:
-            if deblur_or_denoise == 'denoise':
-                sol_img = np.reshape(z_stars[i, 1458:1458 + 784], (28,28))
-            elif deblur_or_denoise == 'deblur':
-                sol_img = np.reshape(z_stars[i, :784], (28,28))
+        # if dataset == 'mri':
+        #     sol_img = np.reshape(z_stars[i, :img_size * img_size], (img_size, img_size))
+        # else:
+        #     if deblur_or_denoise == 'denoise':
+        #         sol_img = np.reshape(z_stars[i, 1458:1458 + 784], (28,28))
+        #     elif deblur_or_denoise == 'deblur':
+        #         sol_img = np.reshape(z_stars[i, :784], (28,28))
         axarr[1].imshow(sol_img, cmap=plt.get_cmap('gray'), label='solution')
         axarr[1].set_title('solution')
 

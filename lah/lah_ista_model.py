@@ -179,7 +179,7 @@ class LAHISTAmodel(L2Omodel):
             t_params = t_params.at[i].set(t) #(jnp.log(t))
         beta_params = convert_t_to_beta(t_params)
         step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
-        step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
+        # step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
         # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
 
         # init steady_state_params
@@ -544,6 +544,7 @@ class LAHISTAmodel(L2Omodel):
                     # params[0] = params[0].at[-1,0].set()
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
                     stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
+                    stochastic_params = stochastic_params.at[-1,1].set(.9)
             else:
                 if special_algo == 'silver' or special_algo == 'conj_grad':
                     stochastic_params = params[0]

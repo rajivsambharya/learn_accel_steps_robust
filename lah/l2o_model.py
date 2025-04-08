@@ -21,7 +21,7 @@ from jaxopt import Bisection
 
 import jax
 jax.config.update("jax_enable_x64", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 # jax.config.update("jax_debug_nans", True)
 
 
@@ -76,7 +76,7 @@ class L2Omodel(object):
         self.create_all_loss_fns(loss_method, regression)
         
 
-        self.step_varying_num = step_varying_num # 50
+        self.step_varying_num = train_unrolls #step_varying_num # 50
 
         # neural network setup
         self.initialize_neural_network(nn_cfg, plateau_decay)
