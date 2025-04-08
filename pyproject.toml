@@ -5,13 +5,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lah"
-description="A package for learning algorithm steps, using data."
+description="A package for learning acceleration methods with robustness, using data."
 readme = "README.md"
 license = {text = "Apache 2.0"}
 dynamic = ["version"]
 authors = [
 {name = "Rajiv Sambharya", email="sambhar9@seas.upenn.edu"},
-{name = "Bartolomeo Stellato", email="bstellato@princeton.edu"}
 ]
 dependencies = [
     "numpy",
