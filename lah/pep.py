@@ -1,6 +1,7 @@
 from functools import partial
 
 import cvxpy as cp
+import numpy as np
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax import grad, lax, vmap
@@ -77,7 +78,7 @@ def pepit_nesterov(mu, L, params):
         print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
         print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
 
-    # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
+    # Return the worst-case guarantee of the evaluated method (and the reference theoretical value)
     return pepit_tau
 
 
@@ -230,12 +231,12 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
     A = cp.Parameter((k+2, k+3))
     
     # Define Gram matrix G and function values F
-    G = cp.Variable((k + 3, k + 3), PSD=True)  # Gram of [x0, x*, g0, ..., g_{k-1}, g_f]
+    G = cp.Variable((k + 3, k + 3), PSD=True)  # Gram of [x0, x*, g0, ..., g_{k-1}, g_k]
     F = cp.Variable(k + 2)  # f(x_0), ..., f(x_k), f(x_*)
 
     constraints = []
 
-    # Interpolation constraints: for i,j in {0, ..., k}, plus g_f
+    # Interpolation constraints: for i,j in {0, ..., k, *}
     for i in range(k + 2):  # includes x_0,...,x_k, y_k, x^*
         for j in range(k + 2):
             if i != j:
@@ -245,7 +246,7 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
                 # Determine gradient indices
                 def grad_idx(idx):
                     if idx <= k: # - 1:
-                        return 2 + idx         # g_0 to g_{k-1}
+                        return 2 + idx  # g_0 to g_{k-1}
                     else:  # x^* has zero gradient
                         return None
 
@@ -336,24 +337,239 @@ def build_A_matrix_with_xstar(alpha_list, beta_list):
 
 
 def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
+    
     """
-    TODO: generalize create_nesterov_pep_sdp_layer but for the strongly convex case
+    creates the cvxpylayer for nesterovs method for the strongly convex case
     """
-    pass
+    k = num_iters
+    A = cp.Parameter((k+2, k+3))
+
+    # Define Gram matrix G and function values F
+    G = cp.Variable((2*k + 3, 2*k + 3), PSD=True)  # Gram of [x_0, x^*, g_0, ..., g_k, x_1, ..., x_k]
+    F = cp.Variable(k + 2)  # f(x_0), ..., f(x_k), f(x^*)
+
+    constraints = []
+
+    # Determine gradient indices
+    def grad_idx(idx):
+        if idx <= k: 
+            return 2 + idx  # g_0 to g_k
+        else:  # x^* has zero gradient
+            return None
+
+    def iter_idx(idx):
+        if idx >= 1 and idx <= k:
+            return k + 2 + idx
+        elif idx == 0:
+            return 0
+        else:
+            return 1
+
+    # Interpolation constraints: for i,j in {0, ..., k, *}
+    for i in range(k + 2):  # includes x_0,...,x_k, x^*
+        for j in range(k + 2):
+            if i != j:
+                # Indices
+                gi_idx = grad_idx(i)
+                gj_idx = grad_idx(j)
+
+                xi_idx = iter_idx(i)
+                xj_idx = iter_idx(j)
+
+                # Gradient terms
+                if gi_idx is None and gj_idx is None:
+                    continue  # both gradients zero → vacuous
+
+                # <g_j, x_i - x_j>
+                if gj_idx is not None:
+                    gj_dot_delta_x = G[gj_idx, xi_idx] - G[gj_idx, xj_idx]
+                else:
+                    gj_dot_delta_x = 0.0
+
+                # ||g_i - g_j||^2
+                if gi_idx is None:
+                    grad_diff_norm_sq = G[gj_idx, gj_idx]
+                elif gj_idx is None:
+                    grad_diff_norm_sq = G[gi_idx, gi_idx]
+                else:
+                    grad_diff_norm_sq = (
+                        G[gi_idx, gi_idx]
+                        - 2 * G[gi_idx, gj_idx]
+                        + G[gj_idx, gj_idx]
+                    )
+
+                # ||x_i - x_j - (1/L)(g_i - g_j)||^2
+                xi_minus_xj_square = G[xi_idx, xi_idx] - 2 * G[xi_idx, xj_idx] + G[xj_idx, xj_idx]
+                
+                if gi_idx is None:
+                    gd_diff_norm_sq = xi_minus_xj_square + (2/L) * gj_dot_delta_x + (1/L)**2 * grad_diff_norm_sq
+                elif gj_idx is None:
+                    gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx]) + (1/L)**2 * grad_diff_norm_sq
+                else:
+                    gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx] - G[gj_idx, xi_idx] + G[gj_idx, xj_idx]) + (1/L)**2 * grad_diff_norm_sq
+
+                # Interpolation inequality
+                constraints.append(
+                    F[i] >= F[j] + gj_dot_delta_x + (1 / (2 * L)) * grad_diff_norm_sq + mu / 2 / (1 - mu/L) * gd_diff_norm_sq
+                )
+    
+    # Equality constraint: express x_1, ... x_k as a function of x_0, g_0, ... g_k using A
+    # it seems that the last row of A is not required?
+    for i in range(1, k+1):
+        Ai = A[i].T
+        constraints.append(G[:, range(k+3)] @ Ai == G[:, i + k + 2])
+
+    # Optional: normalize ||x_0 - x^*||^2 = 1
+    constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
+
+    # Objective: maximize worst-case f(x_k) - f(x^*)
+    objective = cp.Maximize(F[-2] - F[-1])  # A[-1] is x^*
+    prob = cp.Problem(objective, constraints)
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
+    
+    return cvxpylayer
 
 
 def create_quadmin_pep_sdp_layer(mu, L, num_iters):
     """
-    TODO: create cvxpylayer for quadratic min: min_z (1/2) z^T Q z 
+    create cvxpylayer for quadratic min: min_z (1/2) z^T Q z 
     result will be in terms of distance to optimality
     """
-    pass
+
+    k = num_iters
+    a = cp.Parameter(k)
+
+    # Define Gram matrix G
+    G = cp.Variable((2*k + 2, 2*k + 2), PSD=True)  # Gram of [x_0, x_1, ..., x_k, g_0, g_1, ... g_k]
+
+    constraints = []
+
+    # Semidefinite constraints
+    left_psd_mat = np.vstack([-mu * np.eye(k+1), np.eye(k+1)])
+    right_psd_mat = np.vstack([L * np.eye(k+1), -np.eye(k+1)])
+
+    constraints.append(left_psd_mat.T @ G @ right_psd_mat >> 0)
+
+    # Equality constraint: express x_1, ... x_k as a function of x_0, g_0, ... g_k
+    for i in range(1, k+1):
+        constraints.append(G[:, i] == G[:, i-1] - a[i-1] * G[:, i + k])
+
+    # Optional: normalize ||x_0||^2 = 1
+    constraints.append(G[0,0] == 1)
+
+    # Objective: maximize worst-case f(x_k) - f(x^*)
+    objective = cp.Maximize(G[k, k])  
+    prob = cp.Problem(objective, constraints)
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[a], variables=[G])
+    
+    return cvxpylayer
+    
 
 def create_proxgd_pep_sdp_layer(mu, L, num_iters):
     """
-    TODO: create cvxpylayer for quadratic min: min_z f(z) + g(z)
+    create cvxpylayer for quadratic min: min_z f(z) + g(z)
     where f is mu strongly convex and L smooth (mu = 0 is possible)
     g is convex
     bound in terms of function values
     """
-    pass
+
+    k = num_iters
+    
+    a = cp.Parameter(k)
+
+    # Define Gram matrix G and function values F, H
+    G = cp.Variable((3*k + 6, 3*k + 6), PSD=True)  # Gram of [x_0, x^*, g_0, ..., g_k, g^*, s_0, ..., s_k, s^*, x_1, ..., x^k]
+    F = cp.Variable(k + 2)  # f(x_0), ..., f(x_k), f(x^*)
+    H = cp.Variable(k + 2)  # h(x_0), ..., h(x_k), h(x^*)
+
+    constraints = []
+
+    # Determine gradient indices
+    def grad_idx(idx):
+        return 2 + idx  # g_0 to g^*
+
+    # Determine subgradient indices
+    def subgrad_idx(idx):
+        return k + 4 + idx  # s_0 to s^*
+
+    # Determine iterate indices
+    def iter_idx(idx):
+        if idx >= 1 and idx <= k:
+            return 2*k + 5 + idx # x_1, ..., x_k
+        elif idx == 0:
+            return 0 # x_0
+        else:
+            return 1 # x_*
+
+    # Interpolation constraints: for i, j in {0, ..., k, *}
+    for i in range(k + 2):  # includes x_0, ..., x_k, x^*
+        for j in range(k + 2):
+            if i != j:
+                # Indices for iterates
+                xi_idx = iter_idx(i)
+                xj_idx = iter_idx(j)
+
+                # Indices for gradients
+                gi_idx = grad_idx(i)
+                gj_idx = grad_idx(j)
+
+                # <g_j, x_i - x_j>
+                gj_dot_delta_x = G[gj_idx, xi_idx] - G[gj_idx, xj_idx]
+
+                # ||g_i - g_j||^2
+                grad_diff_norm_sq = (
+                    G[gi_idx, gi_idx]
+                    - 2 * G[gi_idx, gj_idx]
+                    + G[gj_idx, gj_idx]
+                )
+
+                # ||x_i - x_j - (1/L)(g_i - g_j)||^2
+                xi_minus_xj_square = G[xi_idx, xi_idx] - 2 * G[xi_idx, xj_idx] + G[xj_idx, xj_idx]
+                gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx] - G[gj_idx, xi_idx] + G[gj_idx, xj_idx]) + (1/L)**2 * grad_diff_norm_sq
+
+                # Interpolation inequality for F
+                constraints.append(
+                    F[i] >= F[j] + gj_dot_delta_x + (1 / (2 * L)) * grad_diff_norm_sq + mu / 2 / (1 - mu/L) * gd_diff_norm_sq
+                )
+
+                # Indices for subgradients
+                sj_idx = subgrad_idx(j)
+
+                # <h_j, x_i - x_j>
+                sj_dot_delta_x = G[sj_idx, xi_idx] - G[sj_idx, xj_idx]
+
+                constraints.append(
+                    H[i] >= H[j] + sj_dot_delta_x
+                )
+
+    # Equality constraint: express x_1, ... x_k as a function of x_0, g_0, ..., g_k, s_0, ..., s_k
+    # x_1 = x_0 - alpha_0(g_0 + s_1)
+    constraints.append(G[:, 2*k+6] == G[:, 0] - a[0] * (G[:, 2] + G[:, k+5]))
+
+    # x_i = x_{i-1} - alpha_{i-1}(g_{i-1} + s_i)
+    if k > 1:
+        for i in range(2, k+1):
+            current_iter_idx = iter_idx(i)
+            prev_iter_idx = iter_idx(i-1)
+            prev_grad_idx = grad_idx(i-1)
+            current_subgrad_idx = subgrad_idx(i)
+            stepsize = a[i-1]
+            constraints.append(G[:, current_iter_idx] == G[:, prev_iter_idx] - stepsize * (G[:, prev_grad_idx] + G[:, current_subgrad_idx]))
+
+    # Equality constraint: g^* + s^* = 0
+    opt_grad_idx = grad_idx(k+1)
+    opt_subgrad_idx = subgrad_idx(k+1)
+    constraints.append(G[:, opt_grad_idx] == -G[:, opt_subgrad_idx])
+
+    # Optional: normalize ||x_0 - x^*||^2 = 1
+    constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
+
+    # Objective: maximize worst-case f(x_k) + h(x_k) - f(x^*) - h(x^*)
+    objective = cp.Maximize(F[-2] + H[-2] - F[-1] - H[-1])
+    prob = cp.Problem(objective, constraints)
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[a], variables=[G, F, H])
+    
+    return cvxpylayer
