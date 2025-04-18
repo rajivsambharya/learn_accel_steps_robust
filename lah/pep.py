@@ -7,7 +7,7 @@ import jax.scipy as jsp
 from jax import grad, lax, vmap
 from jax.tree_util import tree_map
 from PEPit import PEP
-from PEPit.functions import SmoothStronglyConvexFunction
+from PEPit.functions import SmoothStronglyConvexFunction, SmoothConvexFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
@@ -71,8 +71,8 @@ def pepit_nesterov(mu, L, params):
         # print('Warning: momentum is tuned for non-strongly convex functions.')
 
     # Print conclusion if required
-    verbose = 1
-    if verbose != -1:
+    verbose = 0
+    if verbose:
         print('*** Example file:'
             ' worst-case performance of the Accelerated Proximal Gradient Method in function values***')
         print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
@@ -321,7 +321,7 @@ def build_A_matrix_with_xstar(alpha_list, beta_list):
         # Build y_i and y_{i-1}
         y_i = x_i.at[idx_g(i)].add(-alpha_list[i])
         if i == 0:
-            y_im1 = x_im1.at[idx_g(i)].add(-alpha_list[i])
+            y_im1 = x_im1 #x_im1.at[idx_g(i)].add(-alpha_list[i])
         else:
             y_im1 = x_im1.at[idx_g(i - 1)].add(-alpha_list[i - 1])
 
