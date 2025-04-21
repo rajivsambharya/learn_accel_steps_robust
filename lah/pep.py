@@ -7,7 +7,7 @@ import jax.scipy as jsp
 from jax import grad, lax, vmap
 from jax.tree_util import tree_map
 from PEPit import PEP
-from PEPit.functions import SmoothStronglyConvexFunction, SmoothConvexFunction
+from PEPit.functions import SmoothStronglyConvexFunction, SmoothConvexFunction, ConvexFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
@@ -153,7 +153,7 @@ def pepit_quad_accel_gd(mu, L, params):
 
 
 
-def pepit_quadprox_accel_gd(mu, L, params):
+def pepit_quadprox_accel_gd(mu, L, params, mode):
     """
     params is an array of shape (num_iters, 2)
     - the first column is the vector of step sizes
@@ -167,12 +167,14 @@ def pepit_quadprox_accel_gd(mu, L, params):
     problem = PEP()
 
     # Declare a strongly convex smooth function and a convex function
-    f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
     
+    f = problem.declare_function(SmoothStronglyConvexFunction, mu = mu, L=L)
+    h = problem.declare_function(ConvexFunction)
+    F = f + h
 
     # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
-    xs = f.stationary_point()
-    fs = f(xs)
+    xs = F.stationary_point()
+    Fs = F(xs)
 
     # Then define the starting point x0
     x0 = problem.set_initial_point()
@@ -187,12 +189,11 @@ def pepit_quadprox_accel_gd(mu, L, params):
         alpha = step_sizes[i]
         beta = beta_vals[i]
         x_old = x_new
-        x_new = proximal_step(y - alpha * f.gradient(y), f2, alpha)
+        x_new, _, hx_new = proximal_step(y - alpha * f.gradient(y), h, alpha)
         y = x_new + beta * (x_new - x_old)
 
     # Set the performance metric to the function value accuracy
-    problem.set_performance_metric((f(y)) - fs)
-    # problem.set_performance_metric((y - xs)**2)
+    problem.set_performance_metric((f(x_new) + hx_new) - Fs)
 
     # Solve the PEP
     verbose = 1
@@ -297,7 +298,7 @@ def build_A_matrix_with_xstar(alpha_list, beta_list):
     """
     JAX-friendly version
 
-    Returns A: jnp.ndarray of shape (k+3, k+3), where rows are:
+    Returns A: jnp.ndarray of shape (k+2, k+3), where rows are:
     - A[0] to A[k]: x_0 to x_k
     - A[k+1]: x_star
 
@@ -335,9 +336,52 @@ def build_A_matrix_with_xstar(alpha_list, beta_list):
 
     return A
 
+def build_A_matrix_prox_with_xstar(alpha_list, beta_list):
+    """
+    JAX-friendly version
+
+    Returns A: jnp.ndarray of shape (k+2, 2*k+6), where rows are:
+    - A[0] to A[k]: x_0 to x_k
+    - A[k+1] to A[2k]: y_1 to y_k  
+    - A[2k+1]: x_star
+
+    Basis: [x_0, x_star, g_0, ..., g_k, g^*, s_0, ..., s_k, s^*]
+    """
+    k = alpha_list.shape[0]
+    n_basis = 2*k + 8  # [x_0, x_star, g_0, ..., g_k, g^*, s_0, ..., s_k, s^*, g_(y_k), y_k]
+    A0 = jnp.zeros((2*k + 2, n_basis))
+
+    idx_x0 = 0
+    idx_xstar = 1
+    idx_g = lambda t: 2 + t 
+    idx_s = lambda t: k + 4 + t 
+
+    # Initialize A[0] = x0
+    A0 = A0.at[0, idx_x0].set(1.0)
+
+    def body(i, A):
+        x_i = A[i]
+
+        # Build y_i and y_{i-1}
+        y_ip1 = x_i.at[idx_g(i)].add(-alpha_list[i]).at[idx_s(i+1)].add(-alpha_list[i])
+        if i == 0:
+            y_i = x_i
+        else:
+            y_i = A[i+k]
+
+        x_ip1 = (1 + beta_list[i]) * y_ip1 - beta_list[i] * y_i
+        return A.at[i + 1].set(x_ip1).at[i+k+1].set(y_ip1)
+
+    A = lax.fori_loop(0, k, body, A0)
+
+    # x_star
+    A = A.at[2*k + 1, idx_xstar].set(1.0)
+
+    return A
+
 
 def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
-    
+
     """
     creates the cvxpylayer for nesterovs method for the strongly convex case
     """
@@ -357,6 +401,7 @@ def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
         else:  # x^* has zero gradient
             return None
 
+    # Determine iterate indices
     def iter_idx(idx):
         if idx >= 1 and idx <= k:
             return k + 2 + idx
@@ -406,7 +451,7 @@ def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
                 elif gj_idx is None:
                     gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx]) + (1/L)**2 * grad_diff_norm_sq
                 else:
-                    gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx] - G[gj_idx, xi_idx] + G[gj_idx, xj_idx]) + (1/L)**2 * grad_diff_norm_sq
+                    gd_diff_norm_sq = xi_minus_xj_square - (2/L) * (G[gi_idx, xi_idx] - G[gi_idx, xj_idx] - gj_dot_delta_x) + (1/L)**2 * grad_diff_norm_sq
 
                 # Interpolation inequality
                 constraints.append(
@@ -417,7 +462,8 @@ def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
     # it seems that the last row of A is not required?
     for i in range(1, k+1):
         Ai = A[i].T
-        constraints.append(G[:, range(k+3)] @ Ai == G[:, i + k + 2])
+        current_idx = iter_idx(i)
+        constraints.append(G[:, range(k+3)] @ Ai == G[:, current_idx])
 
     # Optional: normalize ||x_0 - x^*||^2 = 1
     constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
@@ -458,7 +504,7 @@ def create_quadmin_pep_sdp_layer(mu, L, num_iters):
     # Optional: normalize ||x_0||^2 = 1
     constraints.append(G[0,0] == 1)
 
-    # Objective: maximize worst-case f(x_k) - f(x^*)
+    # Objective: maximize worst-case ||x_k||^2
     objective = cp.Maximize(G[k, k])  
     prob = cp.Problem(objective, constraints)
     
@@ -467,7 +513,7 @@ def create_quadmin_pep_sdp_layer(mu, L, num_iters):
     return cvxpylayer
     
 
-def create_proxgd_pep_sdp_layer(mu, L, num_iters):
+def create_proxgd_strcvx_pep_sdp_layer(mu, L, num_iters):
     """
     create cvxpylayer for quadratic min: min_z f(z) + g(z)
     where f is mu strongly convex and L smooth (mu = 0 is possible)
@@ -545,18 +591,14 @@ def create_proxgd_pep_sdp_layer(mu, L, num_iters):
                 )
 
     # Equality constraint: express x_1, ... x_k as a function of x_0, g_0, ..., g_k, s_0, ..., s_k
-    # x_1 = x_0 - alpha_0(g_0 + s_1)
-    constraints.append(G[:, 2*k+6] == G[:, 0] - a[0] * (G[:, 2] + G[:, k+5]))
-
     # x_i = x_{i-1} - alpha_{i-1}(g_{i-1} + s_i)
-    if k > 1:
-        for i in range(2, k+1):
-            current_iter_idx = iter_idx(i)
-            prev_iter_idx = iter_idx(i-1)
-            prev_grad_idx = grad_idx(i-1)
-            current_subgrad_idx = subgrad_idx(i)
-            stepsize = a[i-1]
-            constraints.append(G[:, current_iter_idx] == G[:, prev_iter_idx] - stepsize * (G[:, prev_grad_idx] + G[:, current_subgrad_idx]))
+    for i in range(1, k+1):
+        current_iter_idx = iter_idx(i)
+        prev_iter_idx = iter_idx(i-1)
+        prev_grad_idx = grad_idx(i-1)
+        current_subgrad_idx = subgrad_idx(i)
+        stepsize = a[i-1]
+        constraints.append(G[:, current_iter_idx] == G[:, prev_iter_idx] - stepsize * (G[:, prev_grad_idx] + G[:, current_subgrad_idx]))
 
     # Equality constraint: g^* + s^* = 0
     opt_grad_idx = grad_idx(k+1)
@@ -571,5 +613,122 @@ def create_proxgd_pep_sdp_layer(mu, L, num_iters):
     prob = cp.Problem(objective, constraints)
     
     cvxpylayer = CvxpyLayer(prob, parameters=[a], variables=[G, F, H])
+    
+    return cvxpylayer
+
+
+
+
+def create_proxgd_pep_sdp_layer(L, num_iters):
+    """
+    create cvxpylayer for quadratic min: min_z f(z) + h(z)
+    where f is convex and L smooth
+    h is convex
+    bound in terms of function values
+    """
+
+    k = num_iters
+    
+    A = cp.Parameter((2*k + 2, 2*k + 8))
+
+    # Define Gram matrix G and function values F, H
+    G = cp.Variable((2*k + 8, 2*k + 8), PSD=True)  # Gram of [x_0, x^*, g_0, ..., g_k, g^*, s_0, ..., s_k, s_*, g_(y_k), y_k]
+    F = cp.Variable(k + 3)  # f(x_0), ..., f(x_k), f(y_k), f(x^*)
+    H = cp.Variable(k + 2)  # h(y_0), ..., h(y_k), h(y^*)
+
+    constraints = []
+
+    # Determine gradient indices: g_(x_0), ..., g_(x_k), g_(y_k), g_*
+    def grad_idx(idx):
+        if idx != k+1:
+            return 2 + idx  # g_0 to g^*
+        else:
+            return 2*k+6
+
+    # Determine x indices in A [x_0, ..., x_k, y_1, ... y_k, x_*]^T
+    def x_idx(idx):
+        if idx == k+1:
+            return 2*k
+        elif idx == k+2:
+            return 2*k+1
+        else:
+            return idx
+    
+    # Determine subgradient indices: s_(y_0), ..., s_(y_k), s_*
+    def subgrad_idx(idx):
+        return k + 4 + idx  # s_0 to s^*
+
+    # Determine y indices in A [x_0, ..., x_k, y_1, ... y_k, x_*]^T
+    def y_idx(idx):
+        if idx == 0:
+            return 0
+        elif idx == k+1:
+            return 2*k+1
+        else:
+            return idx + k
+
+
+    # Interpolation constraints: for i, j in {0, ..., k, *}
+    for i in range(k + 3):  
+        for j in range(k + 3):
+            if i != j:
+                # Indices for iterates x and y_k
+                A_xi = A[x_idx(i)]
+                A_xj = A[x_idx(j)]
+
+                # Indices for gradients
+                gi_idx = grad_idx(i)
+                gj_idx = grad_idx(j)
+
+                # <g_j, x_i - x_j>
+                delta_x = A_xi - A_xj
+                gj_dot_delta_x = cp.sum(cp.multiply(delta_x, G[gj_idx, :]))
+
+                # ||g_i - g_j||^2
+                grad_diff_norm_sq = (
+                    G[gi_idx, gi_idx]
+                    - 2 * G[gi_idx, gj_idx]
+                    + G[gj_idx, gj_idx]
+                )
+
+                # Interpolation inequality for F
+                constraints.append(
+                    F[i] >= F[j] + gj_dot_delta_x + (1 / (2 * L)) * grad_diff_norm_sq
+                )
+    
+    for i in range(k+2):
+        for j in range(k+2):
+                # Indices for iterates y
+                A_yi = A[y_idx(i)]
+                A_yj = A[y_idx(j)]
+
+                # Indices for subgradients
+                sj_idx = subgrad_idx(j)
+
+                # <s_j, y_i - y_j>
+                delta_y = A_yi - A_yj
+                sj_dot_delta_y = cp.sum(cp.multiply(delta_y, G[sj_idx, :]))
+
+                # Interpolation inequality for H
+                constraints.append(
+                    H[i] >= H[j] + sj_dot_delta_y
+                )
+
+    # Equality constraint: g^* + s^* = 0
+    opt_grad_idx = grad_idx(k+1)
+    opt_subgrad_idx = subgrad_idx(k+1)
+    constraints.append(G[:, opt_grad_idx] == -G[:, opt_subgrad_idx])
+
+    # Equality constraint: y_k
+    constraints.append(G @ A[2*k, :].T == G[:, 2*k+7])
+
+    # Optional: normalize ||x_0 - x^*||^2 = 1
+    constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
+
+    # Objective: maximize worst-case f(x_k) + h(x_k) - f(x^*) - h(x^*)
+    objective = cp.Maximize(F[-2] + H[-2] - F[-1] - H[-1])
+    prob = cp.Problem(objective, constraints)
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F, H])
     
     return cvxpylayer
