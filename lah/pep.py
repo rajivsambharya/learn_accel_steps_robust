@@ -12,6 +12,7 @@ from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 from cvxpylayers.jax import CvxpyLayer
+import dill
 
 
 def pepit_nesterov(mu, L, params):
@@ -289,9 +290,25 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
     objective = cp.Maximize(F[-2] - F[-1])  # A[-1] is x^*
     prob = cp.Problem(objective, constraints)
     
-    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
+    # check if the dill file exists in the cache
+    # if it does exist, then load it
     
-    return cvxpylayer
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
+    # Save it
+    # with open('layer.pkl', 'wb') as f:
+    #     pickle.dump(data, f)
+    
+    
+    # Save
+    with open('layer.dill', 'wb') as f:
+        dill.dump(cvxpylayer, f)
+
+    # Load
+    with open('layer.dill', 'rb') as f:
+        cvxpylayer2 = dill.load(f)
+    
+    return cvxpylayer2
 
 
 def build_A_matrix_with_xstar(alpha_list, beta_list):

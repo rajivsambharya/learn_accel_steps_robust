@@ -285,7 +285,7 @@ def train_logistic_regression(X, y, learning_rate=0.02, beta1=0.9, beta2=0.999, 
         w -= learning_rate * m_w_hat / (np.sqrt(v_w_hat) + epsilon)
         b -= learning_rate * m_b_hat / (np.sqrt(v_b_hat) + epsilon)
         
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             print(f'Epoch {epoch}, Loss: {loss}')
     
     return w, b

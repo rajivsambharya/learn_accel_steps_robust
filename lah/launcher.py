@@ -422,6 +422,8 @@ class Workspace:
                                        z_stars_train=self.z_stars_train,
                                        z_stars_test=self.z_stars_test,
                                        loss_method=cfg.loss_method,
+                                       pep_regularizer_coeff=cfg.pep_regularizer_coeff,
+                                       pep_target=cfg.pep_target,
                                        algo_dict=input_dict)
         
     def create_lm_ista_model(self, cfg, static_dict):

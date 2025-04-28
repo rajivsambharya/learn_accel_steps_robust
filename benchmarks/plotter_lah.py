@@ -11,6 +11,7 @@ from lah.utils.data_utils import recover_last_datetime
 
 from lah.examples.robust_kalman import plot_positions_overlay, get_x_kalman_from_x_primal
 from lah.examples.mnist import plot_mult_mnist_img
+from lah.pep import pepit_quadprox_accel_gd, pepit_nesterov
 
 from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_starts, titles_2_markers, titles_2_styles
 
@@ -70,102 +71,30 @@ def unconstrained_qp_plot_eval_iters(cfg):
     create_lah_results_constrained(example, cfg)
 
 
-@hydra.main(config_path='configs/mnist', config_name='mnist_plot.yaml')
-def mnist_plot_eval_iters(cfg):
-    example = 'mnist'
-    create_lah_results_constrained(example, cfg)
-    mnist_vis(example, cfg)
-
-
 @hydra.main(config_path='configs/quadcopter', config_name='quadcopter_plot.yaml')
 def quadcopter_plot_eval_iters(cfg):
     example = 'quadcopter'
     create_lah_results_constrained(example, cfg)
 
 
-def mnist_vis(example, cfg):
-    # get the data -- [rkf_lah_data, rk]
-    mnist_lah_vis, x_stars, thetas = get_rkf_vis_data(example, cfg.lah_vis_dt)
-    mnist_l2ws_vis, _, __ = get_rkf_vis_data(example, cfg.l2ws_vis_dt)
-    mnist_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt)
-
-    figsize = 784
-    filename = "quant_mult.pdf"
-    indices = np.array([4, 1, 2, 5])
-    plt.rcParams.update(plt.rcParamsDefault)
-    plt.rcParams.update({
-        "text.usetex": True,
-        "font.family": "serif",   # For talks, use sans-serif
-        "font.size": 13,
-        # "font.size": 16,
-    })
-    plt.clf()
-    plot_mult_mnist_img(x_stars[indices, :figsize], 
-                        thetas[indices, :figsize], 
-                        mnist_l2ws_vis[indices, :figsize], 
-                        mnist_lm_vis[indices, :figsize], 
-                        mnist_lah_vis[indices, :figsize], 
-                        filename, figsize=figsize)
-
-
-def rkf_vis(example, cfg):
-    # get the data -- [rkf_lah_data, rk]
-    rkf_lah_vis, x_stars, thetas = get_rkf_vis_data(example, cfg.lah_vis_dt)
-    rkf_l2ws_vis, _, __ = get_rkf_vis_data(example, cfg.l2ws_vis_dt)
-    rkf_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt)
-    # rkf_opt_vis = get_rkf_opt_data(example, cfg.lah_vis_dt)
-    # rkf_thetas_vis = get_rkf_thetas_data(example, cfg.lah_vis_dt)
-
-    T = 50
-    num = 300
-    # iter = 20
-
-    # for i in range(len(cfg.vis_indices)):
-    #     index = cfg.vis_indices[i]
-    for index in range(200):
-        titles = ['optimal solution', 'noisy trajectory']
-
-        y_mat_rotated = np.reshape(thetas[:num, :], (num, T, 2))
-
-        # for i in range(num):
-        x_true_kalman = get_x_kalman_from_x_primal(x_stars[index, :], T)
-        traj = [x_true_kalman, y_mat_rotated[index, :].T]
-
-        x_kalman_lah = get_x_kalman_from_x_primal(rkf_lah_vis[index,  :], T)
-        x_kalman_l2ws = get_x_kalman_from_x_primal(rkf_l2ws_vis[index,  :], T)
-        x_kalman_lm = get_x_kalman_from_x_primal(rkf_lm_vis[index,  :], T)
-        traj.append(x_kalman_lah)
-        traj.append(x_kalman_l2ws)
-        traj.append(x_kalman_lm)
-        titles.append(f"lah")
-        titles.append(f"l2ws")
-        titles.append(f"lm")
-        plt.clf()
-        plot_positions_overlay(traj, titles, filename=f"positions_{index}.pdf", legend=False)
-        plot_positions_overlay(traj, titles, filename=f"positions_{index}_leg.pdf", legend=True)
-        print('y_mat_rotated', y_mat_rotated[index, :].T)
-        print('x_true_kalman', x_true_kalman)
-        print('x_kalman_lah', x_kalman_lah)
 
 
 
-def get_rkf_vis_data(example, dt):
-    orig_cwd = hydra.utils.get_original_cwd()
-    dt_path = f"{orig_cwd}/outputs/{example}/train_outputs/{dt}"
-
-    # iterate over all of the ones that start with train_epoch
-    directory = f"{dt_path}/visualize_test"
-    last_folder = find_last_folder_starting_with(directory, 'train_epoch')
-
-    primals_file = f"{directory}/{last_folder}/x_primals.csv"
-    x_primals = read_csv(primals_file, header=None, index_col=0)
-
-    x_stars_file = f"{directory}/{last_folder}/x_stars.csv"
-    x_stars = read_csv(x_stars_file, header=None, index_col=0)
-
-    thetas_file = f"{directory}/{last_folder}/thetas.csv"
-    thetas = read_csv(thetas_file, header=None, index_col=0)
-    return x_primals.to_numpy(), x_stars.to_numpy(), thetas.to_numpy() #[1:, :]
+def get_pep_results(step_sizes, momentum_sizes, mu, L, prox):
+    """
+    prox is either true or false
+    returns a vector of the pep outputs
+    """
+    params = np.vstack([step_sizes, momentum_sizes]).T
+    pep_val = pepit_nesterov(mu, L, params)
+    return pep_val #np.nan_to_num(pep_val, nan=100.0)
+    pep_vals = np.zeros(step_sizes.size)
+    for i in range(1, step_sizes.size):
+        params = np.vstack([step_sizes[:i], momentum_sizes[:i]]).T
+        # pep_vals[i] = pepit_quadprox_accel_gd(mu, L, params)
+        pep_vals[i] = pepit_nesterov(mu, L, params)
+    clean =  np.clip(pep_vals,  a_min=-100.0, a_max=10.0)
+    return np.nan_to_num(clean, nan=100.0)
 
 
 def plot_results_wth_step_sizes(example, cfg, results_dict, gains_dict, num_iters):
@@ -258,11 +187,10 @@ def plot_step_sizes_lasso(example, cfg):
     # get the step sizes (for silver and learned)
     step_sizes_dict = get_lah_gd_step_size(example, cfg)
     lah_step_sizes = step_sizes_dict['lah'].to_numpy()[:, 1]
-
+    
     # get the strongly convex and L-smooth values
     #       can get it from nesterov and no_train
     nesterov_step_size = step_sizes_dict['nesterov'].to_numpy()[0, 1]
-    vanilla_step_size = step_sizes_dict['cold_start'].to_numpy()[0, 1]
     smoothness = 1 / nesterov_step_size
 
     # fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(18, 6), sharey='row') #, sharey=True)
@@ -297,18 +225,85 @@ def plot_step_sizes_lasso(example, cfg):
 
 
 def plot_step_sizes(example, cfg):
+    """
+    1. get the step_sizes and momentum_sizes for 
+        a. nesterov
+        b. lah
+        c. lah2
+        d. lah3
+    2. calculate (or retrive) the worst-case value for each case
+    3. create 2 plots (use the title from the worst-case)
+        1. step_sizes
+        2. momentum_sizes
+    """
     # get the step sizes (for silver and learned)
     step_sizes_dict = get_lah_gd_step_size(example, cfg)
+    
+    step_sizes_list = [step_sizes_dict['nesterov'].to_numpy()[:, 1], step_sizes_dict['lah_1'].to_numpy()[:, 1], step_sizes_dict['lah_2'].to_numpy()[:, 1], step_sizes_dict['lah_3'].to_numpy()[:, 1]]
+    
+    momentum_list = [step_sizes_dict['nesterov'].to_numpy()[:, 2], step_sizes_dict['lah_1'].to_numpy()[:, 2], step_sizes_dict['lah_2'].to_numpy()[:, 2], step_sizes_dict['lah_3'].to_numpy()[:, 2]]
+    
+    worst_case_vals = []
+    L = 1 / step_sizes_list[0][0]
+    prox = False
+    for i in range(4):
+        worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], 0, L, prox))
+    titles = [fr'nesterov: $\gamma = {worst_case_vals[0]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[1]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[2]:.3f}$', r'no robustness: $\gamma =\infty$']
+    
+    # create the actual plots
+    # 1) step sizes
+    step_size_iters = cfg.step_size_iters
+    cmap = plt.cm.Set1
+    colors = cmap.colors
+    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
+    axes[0].set_ylabel('step sizes')
+    # axes[0].set_yscale('log')
+    for i in range(4):
+        axes[i].set_xlabel('iterations')
+        axes[i].set_title(titles[i])
+        axes[i].bar(np.arange(step_size_iters), step_sizes_list[i][:step_size_iters], color='black')
+        axes[i].hlines(2 / L, 0, step_size_iters, color=colors[7])
+    
+    plt.tight_layout()
+    plt.savefig('step_sizes.pdf', bbox_inches='tight')
+    plt.clf()
+    
+
+    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
+    axes[0].set_ylabel('momentum sizes')
+    # axes[0].set_yscale('log')
+    for i in range(4):
+        axes[i].set_xlabel('iterations')
+        axes[i].set_title(titles[i])
+        axes[i].bar(np.arange(step_size_iters), momentum_list[i][:step_size_iters], color='black')
+        axes[i].hlines(1, 0, step_size_iters, color=colors[7])
+    plt.tight_layout()
+    plt.savefig('momentum_sizes.pdf', bbox_inches='tight')
+    plt.clf()
+    
+    
+    return
+    # axes[1].set_xlabel('iterations')
+    # axes[2].set_xlabel('iterations')
+    # axes[3].set_xlabel('iterations')
+    # axes[4].set_xlabel('iterations')
+    # axes[0].set_title('silver') #, color=colors[2])
+    # axes[1].set_title('LAH: 1 step at a time') #, color=colors[1])
+    # axes[2].set_title('LAH: 2 steps at a time') #, color=colors[1])
+    # axes[3].set_title('LAH: 3 steps at a time') #, color=colors[1])
+    # axes[4].set_title('LAH: 10 steps at a time') #, color=colors[1])
+    
+    
     silver_step_sizes = step_sizes_dict['silver'].to_numpy()[:, 1]
     lah_step_sizes = step_sizes_dict['lah'].to_numpy()[:, 1]
+    lah_2_step_sizes = step_sizes_dict['lah_2'].to_numpy()[:, 1]
     lah_momentum_sizes = step_sizes_dict['lah'].to_numpy()[:, 2]
-    lah_onestep_momentum_sizes = step_sizes_dict['lah_one_step'].to_numpy()[:, 2]
+    lah_2_momentum_sizes = step_sizes_dict['lah_2'].to_numpy()[:, 2]
     nesterov_momentum_sizes = np.array([i / (i+3) for i in range(1000)]) #step_sizes_dict['nesterov'].to_numpy()[:, 2]
-
+    
     # get the strongly convex and L-smooth values
     #       can get it from nesterov and no_train
     nesterov_step_size = step_sizes_dict['nesterov'].to_numpy()[0, 1]
-    vanilla_step_size = step_sizes_dict['cold_start'].to_numpy()[0, 1]
     smoothness = 1 / nesterov_step_size
 
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 6), sharey='row') #, sharey=True)
@@ -317,9 +312,6 @@ def plot_step_sizes(example, cfg):
     axes[0].set_title('silver')
     axes[1].set_title('LAH')
     axes[0].set_ylabel('step sizes')
-
-    if example == 'logistic_regression':
-        axes[0].set_yscale('log')
 
     # plot the bar plot for silver
     cmap = plt.cm.Set1
@@ -333,8 +325,7 @@ def plot_step_sizes(example, cfg):
     # add in the horizontal lines for lah
     full_lah = lah_step_sizes[-1] * np.ones(step_size_iters)
     num_lah = min(lah_step_sizes.size, step_size_iters)
-    # import pdb
-    # pdb.set_trace()
+
     full_lah[:num_lah] = lah_step_sizes[:num_lah]
     bars = axes[1].bar(np.arange(step_size_iters), full_lah, color=colors[1])
     axes[1].hlines(2 * nesterov_step_size, 0, step_size_iters, color=colors[3])
@@ -517,12 +508,19 @@ def plot_step_sizes(example, cfg):
 
         plt.tight_layout()
         plt.savefig('momentum_sizes_all.pdf', bbox_inches='tight')
+        plt.clf()
         
+        pep_vals = get_pep_results(lah_step_sizes[:num_lah], lah_momentum_sizes[:num_lah], 0, smoothness, False)
+        pep_vals_onestep = get_pep_results(lah_onestep_sizes[:num_lah], lah_onestep_momentum_sizes[:num_lah], 0, smoothness, False)
+        plt.plot(pep_vals)
+        plt.plot(pep_vals_onestep)
+        plt.yscale('log')
+        plt.tight_layout()
+        plt.savefig('pep_vals.pdf', bbox_inches='tight')
+        import pdb
+        pdb.set_trace()
         
     
-    
-
-
 def get_lah_gd_step_size(example, cfg):
     step_sizes_dict = {}
     for method in cfg.methods:
@@ -533,7 +531,6 @@ def get_lah_gd_step_size(example, cfg):
 
 def get_step_sizes(example, dt, method):
     step_sizes = recover_step_sizes_data(example, dt, method)
-    
     return step_sizes
 
 
@@ -548,7 +545,8 @@ def recover_step_sizes_data(example, dt, method):
 
 def read_step_size_data(dt_path, method):
     if method == 'nesterov':
-        df = read_csv(f"{dt_path}/lah_weights/nesterov/params.csv")
+        # df = read_csv(f"{dt_path}/lah_weights/nesterov/params.csv")
+        df = read_csv(f"{dt_path}/lah_weights/no_train/params.csv")
     elif method == 'silver':
         df = read_csv(f"{dt_path}/lah_weights/silver/params.csv")
     elif method == 'cold_start':
@@ -566,35 +564,10 @@ def read_step_size_data(dt_path, method):
     return df
 
 
-# def find_last_folder_starting_with(directory, prefix):
-#     # Regular expression to extract the number following the prefix
-#     pattern = re.compile(r'^' + re.escape(prefix) + r'(\d+)$')
-    
-#     max_value = -1
-#     last_folder = None
-
-#     # List all directories in the specified directory that match the prefix pattern
-#     for name in os.listdir(directory):
-#         if os.path.isdir(os.path.join(directory, name)):
-#             match = pattern.match(name)
-#             if match:
-#                 value = int(match.group(1))
-#                 if value > max_value:
-#                     max_value = value
-#                     last_folder = name
-#     import pdb
-#     pdb.set_trace()
-#     return last_folder
-
-
 def find_last_folder_starting_with(directory, prefix):
     # List all directories in the specified directory that start with the given prefix
     folders = [name for name in os.listdir(directory) if os.path.isdir(os.path.join(directory, name)) and name.startswith(prefix)]
     # Return the last folder alphabetically
-    # if folders:
-    #     return max(folders)
-    # else:
-    #     return None
     max_val = 0
     for i in range(len(folders)):
         if 'final' in folders[i]:
@@ -646,14 +619,15 @@ def create_lah_results_constrained(example, cfg):
     # takes a different form accuracies_dict['lah'][0.01] = num_iters (it is a single integer)
 
     # calculate the gains (divide by cold start)
-    gains_dict = populate_gains_dict(results_dict, cfg.num_iters, constrained=True)
+    # gains_dict = populate_gains_dict(results_dict, cfg.num_iters, constrained=True)
 
     # calculate the reduction in iterations for accs
     acc_reductions_dict = populate_acc_reductions_dict(accs_dict)
     # takes a different form accuracies_dict['lah'][0.01] = reduction (it is a single fraction)
 
     # do the plotting
-    plot_results_dict_constrained(results_dict, gains_dict, cfg.num_iters)
+    # plot_results_dict_constrained(results_dict, gains_dict, cfg.num_iters)
+    plot_results_dict_constrained(results_dict, {}, cfg.num_iters)
 
     # create the tables (need the accuracies and reductions for this)
     create_acc_reduction_tables(accs_dict, acc_reductions_dict)
@@ -664,7 +638,8 @@ def create_acc_reduction_tables(accs_dict, acc_reductions_dict):
     df_acc = pd.DataFrame()
     df_percent = pd.DataFrame()
 
-    accs = list(accs_dict['cold_start'].keys())
+    # accs = list(accs_dict['cold_start'].keys())
+    accs = list(accs_dict['nesterov'].keys())
 
     # df_acc
     df_acc['accuracies'] = np.array(accs)
@@ -690,15 +665,6 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
     # plot the primal and dual residuals next to each other
     # fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 12), sharey='row') #, sharey=True)
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 6), sharey='row') #, sharey=True)
-    # axes[0, 0].set_yscale('log')
-    # axes[1, 0].set_yscale('log')
-    # axes[1, 0].set_xlabel('iterations')
-    # axes[1, 1].set_xlabel('iterations')
-    # axes[0, 0].set_title('primal residuals')
-    # axes[0, 1].set_title('dual residuals')
-
-    # axes[0, 0].set_ylabel('residual value')
-    # axes[1, 0].set_ylabel('gain to vanilla')
 
     axes[0].set_yscale('log')
     axes[1].set_yscale('log')
@@ -743,12 +709,8 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
     # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
-    # axes[1].set_yscale('log')
     plt.xlabel('iterations')
     plt.title('objective suboptimality')
-
-    # if example == 'logistic_regression':
-    #     plt.xscale('log')
 
     # plt.ylabel('objective suboptimality')
     # axes[1].set_ylabel('gain to vanilla')
@@ -762,8 +724,6 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
         marker = titles_2_markers[method]
         color = titles_2_colors[method]
         mark_start = titles_2_marker_starts[method]
-        # import pdb
-        # pdb.set_trace()
 
         if method == 'lm' and 'lm10000' in methods:
             continue
@@ -785,7 +745,7 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
 
 
 def populate_acc_reductions_dict(accs_dict):
-    cold_start_dict = accs_dict['cold_start']
+    cold_start_dict = accs_dict['nesterov']
     acc_reductions_dict = {}
     methods = list(accs_dict.keys())
     for i in range(len(methods)):
@@ -841,19 +801,8 @@ def populate_gains_dict(results_dict, num_iters, constrained=True):
 def populate_results_dict(example, cfg, constrained=True):
     results_dict = {}
     for method in cfg.methods:
-        if method[:2] != 'LB' and method[:2] != 'UB':
-            curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained)
-            results_dict[method] = curr_method_dict
-
-        # curr_method_dict is a dict of 
-        #   {'pr': pr_residuals, 'dr': dr_residuals, 'dist_opt': dist_opts, 'pr_dr_max': pr_dr_maxes}
-        # important: nothing to do with reductions or gains here
-
-        # handle the upper and lower bounds for lah
-        else:
-            curr_method_dict = populate_curr_method_bound_dict(method, example, cfg, constrained)
-            results_dict[method] = curr_method_dict
-        
+        curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained)
+        results_dict[method] = curr_method_dict
 
     return results_dict
 
@@ -924,100 +873,6 @@ def get_accs():
     return accuracies
 
 
-def get_frac_solved_data_classical(example, dt, upper, title):
-    # setup
-    # cold_start_datetimes = cfg.cold_start_datetimes
-    
-    guarantee_results = []
-
-    accuracies = get_accs()
-    for acc in accuracies:
-        curr_guarantee_results = load_frac_solved(example, dt, acc, upper, title)
-        guarantee_results.append(curr_guarantee_results)
-
-    return np.stack(guarantee_results)
-
-
-def populate_curr_method_bound_dict(method, example, cfg, constrained):
-    # get the datetime
-    dt = cfg['methods'][method]
-
-    # distinguish between upper and lower bounds
-    upper = method[:2] == 'UB'
-
-    # get the column
-    col = method2col(method)
-
-    if constrained:
-        primal_residuals = recover_data(example, dt, 'primal_residuals_test.csv', col)
-        dual_residuals = recover_data(example, dt, 'dual_residuals_test.csv', col)
-        pr_dr_maxes = recover_data(example, dt, 'pr_dr_max_test.csv', col)
-        # dist_opts = recover_data(example, dt, 'dist_opts_df_test.csv', col)
-
-        # guarantee_results = get_frac_solved_data_classical(example, dt, upper)
-
-        quantile = 100 - float(method[2:])
-        # upper = method[:2] == 'UB'
-        # accuracies = get_accs()
-        # pr_dr_maxes = aggregate_to_quantile_bound(guarantee_results, quantile, accuracies, upper, cfg.num_iters)
-        primal_residuals = recover_bound_data(example, dt, upper, quantile, cfg.num_iters, 'primal_residuals')
-        dual_residuals = recover_bound_data(example, dt, upper, quantile, cfg.num_iters, 'dual_residuals')
-        pr_dr_maxes = recover_bound_data(example, dt, upper, quantile, cfg.num_iters, 'pr_dr_maxes')
-
-        # populate with pr, dr, pr_dr_max, dist_opt
-        curr_method_dict = {'pr': np.clip(primal_residuals, a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'dr': np.clip(dual_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'pr_dr_max': pr_dr_maxes} #,
-                            # 'dist_opts': dist_opts}
-    else:
-        # get the results for all of the tolerances
-        # guarantee_results is a list of vectors - each vector is a diff tolerance and gives risk bound over K
-        title = 'obj_diffs'
-        guarantee_results = get_frac_solved_data_classical(example, dt, upper, title)
-
-        # aggregate into a quantile bound
-        quantile = 100 - float(method[2:])
-        upper = method[:2] == 'UB'
-        accuracies = get_accs()
-        obj_diffs = aggregate_to_quantile_bound(guarantee_results, quantile, accuracies, upper, cfg.num_iters)
-
-        # obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
-        curr_method_dict = {'obj_diff': obj_diffs}
-
-        # sift through to get the bounds
-        
-    return curr_method_dict
-
-
-def recover_bound_data(example, dt, upper, quantile, num_iters, title):
-    guarantee_results = get_frac_solved_data_classical(example, dt, upper, title)
-    accuracies = get_accs()
-    bound_data = aggregate_to_quantile_bound(guarantee_results, quantile, accuracies, upper, num_iters)
-    return bound_data
-
-
-
-def aggregate_to_quantile_bound(e_stars, quantile, accuracies, upper, cfg_iters):
-    eval_iters = e_stars.shape[1]
-    # e_stars = get_e_stars(guarantee_results, accuracies, eval_iters)
-    
-    quantile_curve = np.zeros(eval_iters)
-    for k in range(eval_iters):
-        if upper:
-            where = np.where(e_stars[:, k] < quantile / 100)[0]
-            if where.size == 0:
-                quantile_curve[k] = max(accuracies)
-            else:
-                quantile_curve[k] = accuracies[np.min(where)]
-        else:
-            where = np.where(e_stars[:, k] > quantile / 100)[0]
-            if where.size == 0:
-                quantile_curve[k] = min(accuracies)
-            else:
-                quantile_curve[k] = accuracies[np.max(where)]
-    return quantile_curve[:cfg_iters]
-
-
 
     
 
@@ -1028,24 +883,8 @@ def populate_curr_method_dict(method, example, cfg, constrained):
     # get the column
     col = method2col(method)
 
-    if constrained:
-        primal_residuals = recover_data(example, dt, 'primal_residuals_test.csv', col)
-        dual_residuals = recover_data(example, dt, 'dual_residuals_test.csv', col)
-        pr_dr_maxes = recover_data(example, dt, 'pr_dr_max_test.csv', col)
-        # dist_opts = recover_data(example, dt, 'dist_opts_df_test.csv', col)
-
-        # populate with pr, dr, pr_dr_max, dist_opt
-        curr_method_dict = {'pr': np.clip(primal_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'dr': np.clip(dual_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'pr_dr_max': pr_dr_maxes} #,
-                            # 'dist_opts': dist_opts}
-    else:
-        obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
-        # if example == 'ridge_regression' and method[:3] == 'lah':
-        #     step_sizes_dict = get_lah_gd_step_size(example, cfg)
-        #     lah_step_sizes = step_sizes_dict[method].to_numpy()[:, 1]
-        #     obj_diffs = ridge_get_subopts(example, cfg, lah_step_sizes)
-        curr_method_dict = {'obj_diff': obj_diffs}
+    obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
+    curr_method_dict = {'obj_diff': obj_diffs}
 
     return curr_method_dict
 
@@ -1072,7 +911,7 @@ def get_pep_data(example, dt):
     
 
 def get_eval_array(df, title):
-    if title == 'cold_start' or title == 'no_learn':
+    if title == 'cold_start' or title == 'no_learn' or title == 'nesterov':
         data = df['no_train']
     elif title == 'nearest_neighbor':
         data = df['nearest_neighbor']

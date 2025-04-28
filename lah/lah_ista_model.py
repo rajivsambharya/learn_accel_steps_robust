@@ -18,6 +18,7 @@ from PEPit.functions import SmoothStronglyConvexFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
+from lah.pep import create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar, pepit_nesterov
 
 
 class LAHISTAmodel(L2Omodel):
@@ -78,6 +79,7 @@ class LAHISTAmodel(L2Omodel):
         self.num_pep_iters = self.train_unrolls
 
         # e2e_loss_fn = self.create_end2end_loss_fn
+        self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
 
 
 
@@ -90,9 +92,8 @@ class LAHISTAmodel(L2Omodel):
 
     def transform_params(self, params, n_iters):
         transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
-        # transformed_params = jnp.zeros((n_iters, 2))
-        transformed_params = transformed_params.at[:n_iters - 1, :].set(jnp.exp(params[0][:n_iters - 1, :]))
-        transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:n_iters - 1, :]))
+        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
         return transformed_params
 
     def perturb_params(self):
@@ -142,16 +143,13 @@ class LAHISTAmodel(L2Omodel):
         # self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         
     def pep_cvxpylayer(self, params):
-        # params = params.at[0,1].set(1)
-        step_sizes = params[:,0]
-        # G, H = self.pep_layer(step_sizes, solver_args={"solve_method": "SCS", "verbose": True})
-
-        beta = params[:,1]
-        beta_sq = beta ** 2
-        k = step_sizes.size
-        G, H = self.pep_layer(step_sizes, beta, beta_sq, solver_args={"solve_method": "CLARABEL", "verbose": True}) #, "max_iters": 10000}) # , 
-
-        return H[-1] - H[0]
+        step_sizes = params[:self.num_pep_iters,0]
+        momentum_sizes = params[:self.num_pep_iters,1]
+        
+        A_param = build_A_matrix_prox_with_xstar(step_sizes, momentum_sizes)
+        G, F, H = self.pep_layer(A_param, solver_args={"solve_method": "SCS", "verbose": True})
+        return F[-2] + H[-2] - F[-1] - H[-1]
+        # return H[-2] - H[-1]
         # penalty = 0
         # beta = params[:,1]
         # theta_vals = 1 / beta

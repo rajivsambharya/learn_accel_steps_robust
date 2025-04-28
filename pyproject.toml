@@ -29,7 +29,8 @@ dependencies = [
     "pepit",
     "jaxopt",
     "cvxpylayers",
-    "mosek"
+    "mosek",
+    "dill"
 ]
 
 [tool.setuptools.packages.find]

@@ -8,7 +8,7 @@ jax.config.update('jax_disable_jit', True)
 
 mu = 1/10
 L = 1
-num_iter = 10
+num_iter = 20
 inv_cond = mu/L
 
 # default theoretical choice for Nesterov (strongly convex): alpha = 1/L, beta = (1-sqrt(q))/(1+sqrt(q)) where q = mu/L
@@ -33,7 +33,7 @@ pepit_nesterov(mu, L, np.column_stack((alpha, beta)))
 # print(sol_proxgd[1][-2] + sol_proxgd[2][-2] - sol_proxgd[1][-1] - sol_proxgd[2][-1])
 
 A = build_A_matrix_prox_with_xstar(alpha, beta)
-layer = create_proxgd_pep_sdp_layer(L, 10)
+layer = create_proxgd_pep_sdp_layer(L, num_iter)
 layer(A, solver_args={"solve_method": "CLARABEL", "verbose": True})
 params = np.array(jnp.vstack([alpha, beta]).T)
 pepit_quadprox_accel_gd(0, L, params, None)

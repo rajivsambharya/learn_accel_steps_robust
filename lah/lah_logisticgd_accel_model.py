@@ -94,8 +94,8 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
     def transform_params(self, params, n_iters):
         # n_iters = params[0].size
         transformed_params = jnp.zeros((n_iters, 2))
-        transformed_params = jnp.clip(transformed_params.at[:n_iters - 1, :].set(jnp.exp(params[0][:n_iters - 1, :])), a_max=50000)
-        transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        transformed_params = jnp.clip(transformed_params.at[:, :].set(jnp.exp(params[0][:, :])), a_max=50000)
+        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
         # transformed_params = transformed_params.at[n_iters - 1, 0].set(jnp.exp(params[0][n_iters - 1, 0]))
         return transformed_params
 
@@ -131,16 +131,14 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
     def init_params(self):
         # init step-varying params
         step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((self.step_varying_num, 2))
-        # step_varying_params =  jnp.ones((self.step_varying_num, 1)) * jnp.log(1.0) # jnp.log(0.1) # 
+        # step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((self.eval_unrolls, 2))
         
         t_params = jnp.ones(self.step_varying_num)
         t = 1
         for i in range(0, self.step_varying_num):
-            t = i #.5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+            t = i
             t_params = t_params.at[i].set(t/(t+3)) #(jnp.log(t))
-        # beta_params = convert_t_to_beta(t_params)
-        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
-        # step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
+
         step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
 
         # init steady_state_params
@@ -153,7 +151,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         momentum_sizes = params[:self.num_pep_iters,1]
         
         A_param = build_A_matrix_with_xstar(step_sizes, momentum_sizes)
-        G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True})
+        G, H = self.pep_layer(A_param, solver_args={"solve_method": "SCS", "verbose": True})
 
         return H[-2] - H[-1]
 
@@ -176,8 +174,8 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                     # stochastic_params = stochastic_params.at[:20,0].set(1/self.smooth_param)
                     # beta = jnp.array([t / (t+3) for t in range(20)])
                     # stochastic_params = stochastic_params.at[:20,1].set(beta)
-                    stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
-                    stochastic_params = stochastic_params.at[-1,1].set(.9)
+                    # stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
+                    # stochastic_params = stochastic_params.at[-1,1].set(.9)
             else:
                 if special_algo == 'silver':
                     stochastic_params = params[0]

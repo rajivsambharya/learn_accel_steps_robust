@@ -188,8 +188,8 @@ def fp_eval_lah_ista_safeguard(i, val, supervised, z_star, lambd, A, safeguard_s
 def fp_train_lah_ista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     z, loss_vec = val
     z_next = fixed_point_ista(z, A, c, lambd, ista_steps[i])
-    # diff = jnp.linalg.norm(z_next - z_star) ** 2
-    diff = jnp.linalg.norm(z_next - z) ** 2
+    diff = jnp.linalg.norm(z_next - z_star) ** 2
+    # diff = jnp.linalg.norm(z_next - z) ** 2
     loss_vec = loss_vec.at[i].set(diff)
     return z_next, loss_vec
 
@@ -320,8 +320,8 @@ def fp_train_lah_fista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     z, y, t, loss_vec = val
     # z_next = fixed_point_fista(z, A, c, lambd, ista_steps[i])
     z_next, y_next, t_next = fixed_point_fista_beta(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
-    # diff = jnp.linalg.norm(z_next - z_star) ** 2
-    diff = jnp.linalg.norm(z_next - z) ** 2
+    diff = jnp.linalg.norm(z_next - z_star) ** 2
+    # diff = jnp.linalg.norm(z_next - z) ** 2
     loss_vec = loss_vec.at[i].set(diff)
     return z_next, y_next, t_next, loss_vec
 
