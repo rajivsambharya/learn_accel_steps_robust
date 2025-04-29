@@ -26,7 +26,7 @@ def vanilla_setup():
 def proxgd_setup():
     mu = 1
     L = 10
-    num_iter = 10
+    num_iter = 25
     # inv_cond = mu / L
 
     # Default theoretical parameters for Nesterov (strongly convex)
@@ -77,7 +77,7 @@ def test_strcvx_smooth_quad_pep_layer_matches_pepit(vanilla_setup):
 
     layer_quad = create_quad_pep_sdp_layer(mu, L, num_iter)
     G = layer_quad(A, solver_args={"eps": 1e-5, "verbose": True})
-    our_tau = float(G[0][2*num_iter + 2, 2*num_iter + 2])
+    our_tau = float(G[0][2*num_iter + 2, 2*num_iter + 2]) ** .5
 
     pepit_tau = float(pepit_accel_gd(mu, L, np.column_stack((alpha, beta)), True, False, "dist"))
 
@@ -91,7 +91,7 @@ def test_strcvx_smooth_quadprox_pep_layer_matches_pepit(proxgd_setup):
 
     layer_quadprox = create_quadprox_pep_sdp_layer(mu, L, num_iter)
     G, H = layer_quadprox(A, solver_args={"eps": 1e-5, "verbose": True})
-    our_tau = float(G[3*num_iter + 7, 3*num_iter + 7] - 2 * G[3*num_iter + 7, 1] + G[1, 1])
+    our_tau = float(G[3*num_iter + 7, 3*num_iter + 7] - 2 * G[3*num_iter + 7, 1] + G[1, 1]) ** .5
 
     pepit_tau = float(pepit_accel_gd(mu, L, np.column_stack((alpha, beta)), True, True, "dist"))
 

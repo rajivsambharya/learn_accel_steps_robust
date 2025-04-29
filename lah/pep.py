@@ -13,6 +13,8 @@ from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 from cvxpylayers.jax import CvxpyLayer
 import dill
+import os
+import hydra
 
 
 def pepit_nesterov(mu, L, params):
@@ -161,10 +163,12 @@ def pepit_accel_gd(mu, L, params, quad, prox, obj):
         print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
 
     # Return the worst-case guarantee of the evaluated method
+    if obj == "dist":
+        return pepit_tau ** .5
     return pepit_tau
 
 
-def create_nesterov_pep_sdp_layer(L, num_iters):
+def create_nesterov_pep_sdp_layer(L, num_iters, cache=True, save=True):
     """
     creates the cvxpylayer for nesterovs method for the non-strongly convex case
     """
@@ -227,27 +231,39 @@ def create_nesterov_pep_sdp_layer(L, num_iters):
 
     # Objective: maximize worst-case f(x_k) - f(x^*)
     objective = cp.Maximize(F[-2] - F[-1])  # A[-1] is x^*
+    
     prob = cp.Problem(objective, constraints)
     
     # check if the dill file exists in the cache
     # if it does exist, then load it
+    orig_cwd = hydra.utils.get_original_cwd()
+    filepath = f'{orig_cwd}/layers/smooth_nesterov_{L:.3f}_{num_iters}.dill'
+    parameters = [A]
+    variables = [G, F]
+    return check_cache(filepath, prob, parameters, variables, cache=cache, save=save)
     
-    
-    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F])
-    # Save it
-    # with open('layer.pkl', 'wb') as f:
-    #     pickle.dump(data, f)
-    
-    
-    # Save
-    with open('layer.dill', 'wb') as f:
-        dill.dump(cvxpylayer, f)
 
-    # Load
-    with open('layer.dill', 'rb') as f:
-        cvxpylayer2 = dill.load(f)
+def check_cache(filepath, prob, parameters, variables, cache=True, save=True):
+    if cache:
+        if os.path.exists(filepath):
+            # Load
+            with open(filepath, 'rb') as f:
+                cvxpylayer = dill.load(f)
+            return cvxpylayer
     
-    return cvxpylayer2
+    cvxpylayer = CvxpyLayer(prob, parameters=parameters, variables=variables)
+
+    # Save
+    if save:
+        # if os.path.exists(filepath):
+        orig_cwd = hydra.utils.get_original_cwd()
+        layers_folder = f'{orig_cwd}/layers'
+        if not os.path.exists(layers_folder):
+            os.mkdir(layers_folder)
+        with open(filepath, 'wb') as f:
+            dill.dump(cvxpylayer, f)
+
+    return cvxpylayer
 
 
 def build_A_matrix_with_xstar(alpha_list, beta_list):

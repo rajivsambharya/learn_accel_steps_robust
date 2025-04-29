@@ -93,11 +93,12 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
     def transform_params(self, params, n_iters):
         # n_iters = params[0].size
-        transformed_params = jnp.zeros((n_iters, 2))
-        transformed_params = jnp.clip(transformed_params.at[:, :].set(jnp.exp(params[0][:, :])), a_max=50000)
-        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
-        # transformed_params = transformed_params.at[n_iters - 1, 0].set(jnp.exp(params[0][n_iters - 1, 0]))
-        return transformed_params
+        # transformed_params = jnp.zeros((n_iters, 2))
+        # transformed_params = jnp.clip(transformed_params.at[:, :].set(jnp.exp(params[0][:, :])), a_max=50000)
+        # # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        # # transformed_params = transformed_params.at[n_iters - 1, 0].set(jnp.exp(params[0][n_iters - 1, 0]))
+        # return transformed_params
+        return jnp.exp(params[0][:, :])
 
     def perturb_params(self):
         # init step-varying params
@@ -130,12 +131,14 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
     def init_params(self):
         # init step-varying params
-        step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((self.step_varying_num, 2))
-        # step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((self.eval_unrolls, 2))
+        k = self.eval_unrolls
         
-        t_params = jnp.ones(self.step_varying_num)
+        # step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((self.step_varying_num, 2))
+        step_varying_params = jnp.log(1 / (self.smooth_param)) * jnp.ones((k, 2))
+        
+        t_params = jnp.ones(k)
         t = 1
-        for i in range(0, self.step_varying_num):
+        for i in range(0, k):
             t = i
             t_params = t_params.at[i].set(t/(t+3)) #(jnp.log(t))
 

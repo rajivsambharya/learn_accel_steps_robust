@@ -303,6 +303,8 @@ class Workspace:
                                        test_inputs=self.test_inputs,
                                        regression=cfg.supervised,
                                        nn_cfg=cfg.nn_cfg,
+                                       pep_regularizer_coeff=cfg.get('pep_regularizer_coeff', None),
+                                       pep_target=cfg.get('pep_target', None),
                                        z_stars_train=self.z_stars_train,
                                        z_stars_test=self.z_stars_test,
                                        loss_method=cfg.loss_method,

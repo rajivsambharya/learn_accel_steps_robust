@@ -443,9 +443,11 @@ class L2Omodel(object):
             if diff_required:
                 losses = batch_predict(params, inputs, b, iters, z_stars, key)
                 
-                # update so that we have pep
-                pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
-                if self.pep_regularizer_coeff is not None:
+                
+
+                if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
+                    # update so that we have pep
+                    pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
                     return losses.mean() + self.pep_regularizer_coeff * jnp.clip(pep_loss - self.pep_target, a_min=0, a_max=10000) ** 2
                 else:
                     return losses.mean()

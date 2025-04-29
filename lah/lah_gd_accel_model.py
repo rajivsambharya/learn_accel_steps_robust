@@ -11,7 +11,7 @@ from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
 from functools import reduce
-from lah.pep import build_A_matrix_with_xstar, create_nesterov_pep_sdp_layer, pepit_quad_accel_gd
+from lah.pep import build_A_matrix_with_xstar, create_nesterov_pep_sdp_layer, create_quad_pep_sdp_layer, pepit_accel_gd
 
 
 class LAHAccelGDmodel(L2Omodel):
@@ -79,12 +79,13 @@ class LAHAccelGDmodel(L2Omodel):
         # end-to-end added fixed warm start eval - bypasses neural network
         # self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
         # self.pep_layer = create_nesterov_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
+        self.pep_layer = create_quad_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
         import pdb
         pdb.set_trace()
 
         
     def pepit_nesterov_check(self, params):
-        return pepit_quad_accel_gd(self.str_cvx_param._value, self.smooth_param._value, params)
+        return pepit_accel_gd(self.str_cvx_param._value, self.smooth_param._value, params, True, False, 'dist')
 
 
     def transform_params(self, params, n_iters):
@@ -238,15 +239,25 @@ class LAHAccelGDmodel(L2Omodel):
         loss_fn = self.predict_2_loss(predict, diff_required)
         return loss_fn
     
+    # def pep_cvxpylayer(self, params):
+    #     step_sizes = params[:self.num_pep_iters,0]
+    #     momentum_sizes = params[:self.num_pep_iters,1]
+        
+    #     A_param = build_A_matrix_with_yk_and_xstar(step_sizes, momentum_sizes)
+    #     G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True})
+
+    #     return H[-3] - H[-1]
     def pep_cvxpylayer(self, params):
         step_sizes = params[:self.num_pep_iters,0]
         momentum_sizes = params[:self.num_pep_iters,1]
         
-        A_param = build_A_matrix_with_yk_and_xstar(step_sizes, momentum_sizes)
-        G, H = self.pep_layer(A_param, solver_args={"solve_method": "CLARABEL", "verbose": True})
-
-        return H[-3] - H[-1]
-    
+        A_param = build_A_matrix_with_xstar(step_sizes, momentum_sizes)
+        G, = self.pep_layer(A_param, solver_args={"solve_method": "SCS", "verbose": True})
+        k = self.num_pep_iters
+        # import pdb
+        # pdb.set_trace()
+        return G[2*k+2, 2*k+2] ** .5
+        return H[-2] - H[-1]
 
 
 def generate_yz_sequences(kappa, t):
