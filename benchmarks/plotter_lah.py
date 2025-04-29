@@ -11,7 +11,7 @@ from lah.utils.data_utils import recover_last_datetime
 
 from lah.examples.robust_kalman import plot_positions_overlay, get_x_kalman_from_x_primal
 from lah.examples.mnist import plot_mult_mnist_img
-from lah.pep import pepit_quadprox_accel_gd, pepit_nesterov
+from lah.pep import pepit_nesterov, pepit_accel_gd
 
 from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_starts, titles_2_markers, titles_2_styles
 
@@ -62,7 +62,8 @@ def logistic_regression_plot_eval_iters(cfg):
 def lasso_plot_eval_iters(cfg):
     example = 'lasso'
     create_lah_results_unconstrained(example, cfg)
-    plot_step_sizes_lasso(example, cfg)
+    # plot_step_sizes_lasso(example, cfg)
+    plot_step_sizes(example, cfg)
 
 
 @hydra.main(config_path='configs/unconstrained_qp', config_name='unconstrained_qp_plot.yaml')
@@ -78,15 +79,14 @@ def quadcopter_plot_eval_iters(cfg):
 
 
 
-
-
-def get_pep_results(step_sizes, momentum_sizes, mu, L, prox):
+def get_pep_results(step_sizes, momentum_sizes, mu, L, quad, prox, obj):
     """
     prox is either true or false
     returns a vector of the pep outputs
     """
     params = np.vstack([step_sizes, momentum_sizes]).T
-    pep_val = pepit_nesterov(mu, L, params)
+    # pep_val = pepit_nesterov(mu, L, params)
+    pep_val = pepit_accel_gd(mu, L, params, quad, prox, obj)
     return pep_val #np.nan_to_num(pep_val, nan=100.0)
     pep_vals = np.zeros(step_sizes.size)
     for i in range(1, step_sizes.size):
@@ -239,15 +239,30 @@ def plot_step_sizes(example, cfg):
     # get the step sizes (for silver and learned)
     step_sizes_dict = get_lah_gd_step_size(example, cfg)
     
+    
+    
     step_sizes_list = [step_sizes_dict['nesterov'].to_numpy()[:, 1], step_sizes_dict['lah_1'].to_numpy()[:, 1], step_sizes_dict['lah_2'].to_numpy()[:, 1], step_sizes_dict['lah_3'].to_numpy()[:, 1]]
     
     momentum_list = [step_sizes_dict['nesterov'].to_numpy()[:, 2], step_sizes_dict['lah_1'].to_numpy()[:, 2], step_sizes_dict['lah_2'].to_numpy()[:, 2], step_sizes_dict['lah_3'].to_numpy()[:, 2]]
     
     worst_case_vals = []
-    L = 1 / step_sizes_list[0][0]
-    prox = False
+    # L = 1 / step_sizes_list[0][0]
+    if example == 'lasso':
+        mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], False, True, 'func'
+    elif example == 'logistic_regression':
+        mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], False, False, 'func'
+    elif example == 'ridge_regression':
+        mu = 0.01
+        step_size = step_sizes_list[0][0]
+        L = (4 / step_size - mu) / 3
+        quad, prox, obj = True, False, 'dist'
+        # import pdb
+        # pdb.set_trace()
+        # lah_out = get_pep_results(step_sizes_dict['lah'].to_numpy()[:, 1][:30], 0*step_sizes_dict['lah'].to_numpy()[:, 1][:30], mu, L, quad, prox, obj)
+    
+        
     for i in range(4):
-        worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], 0, L, prox))
+        worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], mu, L, quad, prox, obj))
     titles = [fr'nesterov: $\gamma = {worst_case_vals[0]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[1]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[2]:.3f}$', r'no robustness: $\gamma =\infty$']
     
     # create the actual plots
@@ -604,8 +619,8 @@ def create_lah_results_unconstrained(example, cfg):
     # create the tables (need the accuracies and reductions for this)
     create_acc_reduction_tables(accs_dict, acc_reductions_dict)
 
-    if example == 'lasso':
-        plot_results_wth_step_sizes(example, cfg, results_dict, gains_dict, cfg.num_iters)
+    # if example == 'lasso':
+    #     plot_results_wth_step_sizes(example, cfg, results_dict, gains_dict, cfg.num_iters)
 
 
 def create_lah_results_constrained(example, cfg):
@@ -735,8 +750,8 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,
                      markevery=(0, 3))
         else:
-            plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color, 
-                                    markevery=(mark_start, markevery))
+            plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,  markevery=(0, 3))
+                                    # markevery=(mark_start, markevery))
         
 
     plt.tight_layout()

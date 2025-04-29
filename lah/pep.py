@@ -237,7 +237,7 @@ def create_nesterov_pep_sdp_layer(L, num_iters, cache=True, save=True):
     # check if the dill file exists in the cache
     # if it does exist, then load it
     orig_cwd = hydra.utils.get_original_cwd()
-    filepath = f'{orig_cwd}/layers/smooth_nesterov_{L:.3f}_{num_iters}.dill'
+    filepath = f'{orig_cwd}/layers/smooth_nesterov/{L:.3f}_{num_iters}.dill'
     parameters = [A]
     variables = [G, F]
     return check_cache(filepath, prob, parameters, variables, cache=cache, save=save)
@@ -585,7 +585,7 @@ def create_quadprox_pep_sdp_layer(mu, L, num_iters):
 
 
 
-def create_proxgd_pep_sdp_layer(L, num_iters):
+def create_proxgd_pep_sdp_layer(L, num_iters, cache=True, save=True):
     """
     create cvxpylayer for quadratic min: min_z f(z) + h(z)
     where f is convex and L smooth
@@ -695,9 +695,12 @@ def create_proxgd_pep_sdp_layer(L, num_iters):
     objective = cp.Maximize(F[-2] + H[-2] - F[-1] - H[-1])
     prob = cp.Problem(objective, constraints)
     
-    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, F, H])
     
-    return cvxpylayer
+    orig_cwd = hydra.utils.get_original_cwd()
+    filepath = f'{orig_cwd}/layers/proxgd_nesterov/{L:.3f}_{num_iters}.dill'
+    parameters = [A]
+    variables = [G, F, H]
+    return check_cache(filepath, prob, parameters, variables, cache=cache, save=save)
 
 
 

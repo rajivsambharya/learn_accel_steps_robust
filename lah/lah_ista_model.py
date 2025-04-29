@@ -92,7 +92,7 @@ class LAHISTAmodel(L2Omodel):
 
     def transform_params(self, params, n_iters):
         transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
-        transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:n_iters - 1, :]))
+        transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:, :]))
         # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
         return transformed_params
 
