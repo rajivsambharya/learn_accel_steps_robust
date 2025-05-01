@@ -8,6 +8,7 @@ import lah.examples.mnist as mnist
 import lah.examples.robust_kalman as robust_kalman
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
+import lah.examples.quadcopter as quadcopter
 
 
 @hydra.main(config_path='configs/markowitz', config_name='markowitz_setup.yaml')
@@ -207,3 +208,4 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'opf/data_setup_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_setup_opf()
+

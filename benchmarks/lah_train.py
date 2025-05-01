@@ -8,10 +8,22 @@ import lah.examples.mnist as mnist
 import lah.examples.robust_kalman as robust_kalman
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
+import lah.examples.quadcopter as quadcopter
 from lah.utils.data_utils import copy_data_file, recover_last_datetime
 
 
-
+@hydra.main(config_path='configs/quadcopter', config_name='quadcopter_run.yaml')
+def main_run_quadcopter(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'quadcopter'
+    setup_datetime = cfg.data.datetime
+    if setup_datetime == '':
+        # get the most recent datetime and update datetimes
+        setup_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = setup_datetime
+    copy_data_file(example, setup_datetime)
+    quadcopter.run(cfg)
+    
 
 @hydra.main(config_path='configs/lasso', config_name='lasso_run.yaml')
 def main_run_lasso(cfg):
@@ -331,3 +343,7 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'robust_kalman/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_robust_kalman_lm()
+    elif sys.argv[1] == 'quadcopter':
+        sys.argv[1] = base + 'quadcopter/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_quadcopter()

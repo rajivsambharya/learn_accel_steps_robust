@@ -1,0 +1,79 @@
+QT_factor: 1
+Q_diag:
+- 1
+- 1
+- 1
+- 0
+- 0
+- 0
+- 0
+- 0
+- 0
+- 0
+R_diag:
+- 0.0005
+- 0.0005
+- 0.0005
+- 0.0005
+T: 20
+delta_u:
+- 20
+- 4
+- 4
+- 4
+dt: 0.05 #0.05
+goal_bound: 0.5
+noise_std_dev: 0.0
+num_goals: 5
+num_rollouts: 5 #110
+obstacle_tol: 0.1
+rollout_length: 100 #00
+rollout_osqp_iters: 20 #2000
+save_gif: true
+seed: 42
+solve: true
+solve_acc_abs: 0.0001
+solve_acc_rel: 0
+# u_max:
+# - 15
+# - 3
+# - 3
+# - 3
+# u_min:
+# - 2
+# - -3
+# - -3
+# - -3
+u_max:
+- 20
+- 6
+- 6
+- 6
+u_min:
+- 2
+- -6
+- -6
+- -6
+waypoints: 15
+x_max:
+- 1
+- 1
+- 1
+- 50
+- 50
+- 50
+- 1
+- 1
+- 1
+- 1
+x_min:
+- -1
+- -1
+- -1
+- -50
+- -50
+- -50
+- 0
+- -1
+- -1
+- -1

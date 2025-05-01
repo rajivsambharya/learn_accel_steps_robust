@@ -30,7 +30,8 @@ dependencies = [
     "jaxopt",
     "cvxpylayers",
     "mosek",
-    "dill"
+    "dill",
+    "trajax @ git+https://github.com/google/trajax"
 ]
 
 [tool.setuptools.packages.find]
