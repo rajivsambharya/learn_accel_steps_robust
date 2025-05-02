@@ -278,7 +278,7 @@ def osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None):
     plt.clf()
 
 
-def ista_setup_script(b_mat, A, lambd, output_filename):
+def ista_setup_script(b_mat, A, lambd, output_filename, box=None):
     # def solve_many_probs_cvxpy(A, b_mat, lambd):
     """
     solves many lasso problems where each problem has a different b vector
@@ -286,7 +286,10 @@ def ista_setup_script(b_mat, A, lambd, output_filename):
     m, n = A.shape
     N = b_mat.shape[0]
     z, b_param = cp.Variable(n), cp.Parameter(m)
-    prob = cp.Problem(cp.Minimize(.5 * cp.sum_squares(np.array(A) @ z - b_param) + lambd * cp.norm(z, p=1)))
+    if box:
+        prob = cp.Problem(cp.Minimize(.5 * cp.sum_squares(np.array(A) @ z - b_param) + lambd * cp.norm(z, p=1)), constraints=[z >= 0, z <= 1])
+    else:
+        prob = cp.Problem(cp.Minimize(.5 * cp.sum_squares(np.array(A) @ z - b_param) + lambd * cp.norm(z, p=1)))
     z_stars = jnp.zeros((N, n))
     objvals = jnp.zeros((N))
     solve_times = np.zeros(N)

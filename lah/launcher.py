@@ -15,6 +15,7 @@ from jax.interpreters import xla
 from functools import partial
 
 from lah.algo_steps import create_projection_fn, get_psd_sizes
+from lah.lah_box_qp_accel_model import LAHBOXQPAccelmodel
 from lah.gd_model import GDmodel
 from lah.ista_model import ISTAmodel
 from lah.lm_gd_model import LMGDmodel
@@ -206,6 +207,8 @@ class Workspace:
             self.create_lah_accel_gd_model(cfg, static_dict)
         elif algo == 'lah_accel_scs':
             self.create_lah_accel_scs_model(cfg, static_dict)
+        elif algo == 'lah_accel_box_qp':
+            self.create_lah_box_qp_accel_model(cfg, static_dict)
         
         
         
@@ -416,6 +419,40 @@ class Workspace:
                           A=A
                           )
         self.l2ws_model = LAHISTAmodel(train_unrolls=self.train_unrolls,
+                                       eval_unrolls=self.eval_unrolls,
+                                       train_inputs=self.train_inputs,
+                                       test_inputs=self.test_inputs,
+                                       regression=cfg.supervised,
+                                       nn_cfg=cfg.nn_cfg,
+                                       z_stars_train=self.z_stars_train,
+                                       z_stars_test=self.z_stars_test,
+                                       loss_method=cfg.loss_method,
+                                       pep_regularizer_coeff=cfg.pep_regularizer_coeff,
+                                       pep_target=cfg.pep_target,
+                                       algo_dict=input_dict)
+        
+    def create_lah_box_qp_accel_model(self, cfg, static_dict):
+        # get A, lambd, ista_step
+        A = static_dict['A']
+        P = A.T @ A
+        lambd = static_dict['lambd']
+        l = static_dict['l']
+        u = static_dict['u']
+
+        # transform q_mat_train and q_mat_test
+        self.q_mat_train = (-A.T @ self.q_mat_train.T + lambd).T
+        self.q_mat_test = (-A.T @ self.q_mat_test.T + lambd).T
+        
+
+        input_dict = dict(algorithm='lah_box_qp_accel',
+                          c_mat_train=self.q_mat_train,
+                          c_mat_test=self.q_mat_test,
+                          lambd=lambd,
+                          P=P,
+                          l=l,
+                          u=u
+                          )
+        self.l2ws_model = LAHBOXQPAccelmodel(train_unrolls=self.train_unrolls,
                                        eval_unrolls=self.eval_unrolls,
                                        train_inputs=self.train_inputs,
                                        test_inputs=self.test_inputs,

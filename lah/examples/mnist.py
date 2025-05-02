@@ -65,7 +65,8 @@ def run(run_cfg, model='lah'):
     # static_dict = dict(factor=factor, P=P, A=A, rho=rho_vec)
     evals, evecs = jnp.linalg.eigh(B.T @ B)
     ista_step =  1 / evals.max()
-    static_dict = dict(A=jnp.array(B), lambd=lambd, ista_step=ista_step)
+    n = B.shape[0]
+    static_dict = dict(A=jnp.array(B), lambd=lambd, ista_step=ista_step, l=jnp.zeros(n), u=jnp.ones(n))
 
     # we directly save q now
     static_flag = True
@@ -76,7 +77,7 @@ def run(run_cfg, model='lah'):
     # elif model == 'lm':
     #     algo = 'lm_osqp'
     if model == 'lah':
-        algo = 'lah_ista'
+        algo = 'lah_accel_box_qp'
     elif model == 'l2ws':
         algo = 'ista'
     elif model == 'lm':
@@ -163,7 +164,7 @@ def setup_probs(setup_cfg):
             theta_mat = theta_mat.at[i, :].set(blurred_img_vec)
             # blurred_imgs.append(blurred_img)
             
-    z_stars = ista_setup_script(theta_mat, B, lambd, output_filename)
+    z_stars = ista_setup_script(theta_mat, B, lambd, output_filename, box=True)
     # z_stars = direct_osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None)
     
     if not os.path.exists('images'):

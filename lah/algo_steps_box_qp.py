@@ -306,14 +306,14 @@ def fp_eval_fbox_qp(i, val, supervised, z_star, A, b, lambd, box_qp_step):
     return z_next, y_next, t_next, loss_vec, obj_diffs, z_all
 
 
-def k_steps_train_lah_accel_box_qp(k, z0, y0, P, c, l, u, params, supervised, z_star, jit):
+def k_steps_train_lah_accel_box_qp(k, z0, y0, P, q, l, u, params, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
 
     fp_train_partial = partial(fp_train_lah_accel_box_qp,
                                supervised=supervised,
                                z_star=z_star,
                                P=P,
-                               c=c,
+                               c=q,
                                l=l,
                                u=u,
                                box_qp_steps=params
@@ -328,18 +328,20 @@ def k_steps_train_lah_accel_box_qp(k, z0, y0, P, c, l, u, params, supervised, z_
     return z_final, iter_losses
 
 
-def fp_train_lah_accel_box_qp(i, val, supervised, z_star, lambd, A, c, box_qp_steps):
+def fp_train_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_steps):
     z, y, t, loss_vec = val
     # z_next = fixed_point_fbox_qp(z, A, c, lambd, box_qp_steps[i])
     z_next, y_next, t_next = fixed_point_accel_box_qp_beta(
-        z, y, box_qp_steps[i, 1], A, c, lambd, box_qp_steps[i, 0])
+        z, y, box_qp_steps[i, 1], P, c, l, u, box_qp_steps[i, 0])
     diff = jnp.linalg.norm(z_next - z_star) ** 2
     # diff = jnp.linalg.norm(z_next - z) ** 2
-    loss_vec = loss_vec.at[i].set(diff)
+    obj = .5 * z @ P @ z + c @ z
+    opt_obj = .5 * z_star @ P @ z_star + c @ z_star
+    loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 
-def k_steps_eval_lah_accel_box_qp(k, z0, P, c, l, u, params, supervised, z_star, jit):
+def k_steps_eval_lah_accel_box_qp(k, z0, P, q, l, u, params, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
@@ -348,7 +350,7 @@ def k_steps_eval_lah_accel_box_qp(k, z0, P, c, l, u, params, supervised, z_star,
                               supervised=supervised,
                               z_star=z_star,
                               P=P,
-                              c=c,
+                              c=q,
                               l=l,
                               u=u,
                               box_qp_steps=params
@@ -380,7 +382,7 @@ def fp_eval_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_step
     # obj = .5 * jnp.linalg.norm(A @ z - c) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
     # opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
     obj = .5 * z @ P @ z + c @ z
-    opt_obj = 0 #.5 * z_star @ P @ z_star + c @ z_star
+    opt_obj = .5 * z_star @ P @ z_star + c @ z_star
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
 
     z_all = z_all.at[i, :].set(z_next)
