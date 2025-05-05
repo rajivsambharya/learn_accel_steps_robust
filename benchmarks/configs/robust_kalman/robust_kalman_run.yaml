@@ -1,8 +1,8 @@
 nn_cfg:
-  lr: 1e-1
+  lr: 1e-2
   method: adam
   batch_size: 10
-  epochs: 300
+  epochs: 5000
 
 
 data:
@@ -11,20 +11,20 @@ data:
 num_const_steps: 1
 
 
-eval_unrolls: 500
-eval_every_x_epochs: 50
+eval_unrolls: 300
+eval_every_x_epochs: 100
 save_every_x_epochs: 1
 # test_every_x_epochs: 10
 write_csv_every_x_batches: 1
 N_train: 10
-N_test: 1000
-N_val: 1000
+N_test: 100
+N_val: 10
 num_samples_train: 10
 num_samples_test: 100
 # num_samples_train: 1000
 
-plot_iterates: [0, 9, 20]
-loss_method: 'fixed_k' #'fixed_k' #'constant_sum'
+plot_iterates: [0, 9, 20, 40]
+loss_method: 'constant_sum' #'fixed_k' #'constant_sum'
 share_all: False
 num_clusters: 2000
 pretrain_alpha: False
@@ -39,10 +39,13 @@ iterates_visualize: [20]
 save_weights_flag: False #True
 vis_num: 500
 supervised: True
-train_unrolls: 20
+train_unrolls: 40
 skip_startup: False
 
 
 
 custom_loss: False
 algo: lah
+
+pep_regularizer_coeff: 0
+pep_target: 0.005

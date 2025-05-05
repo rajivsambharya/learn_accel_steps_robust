@@ -16,7 +16,7 @@
 # salt_and_pepper_noise_prob: 0.2
 
 A_scale: 1
-N_test: 10
+N_test: 100
 N_train: 10 #0
 blur_size: 8
 dataset: emnist

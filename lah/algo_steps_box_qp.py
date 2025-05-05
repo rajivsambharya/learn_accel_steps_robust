@@ -337,7 +337,8 @@ def fp_train_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_ste
     # diff = jnp.linalg.norm(z_next - z) ** 2
     obj = .5 * z @ P @ z + c @ z
     opt_obj = .5 * z_star @ P @ z_star + c @ z_star
-    loss_vec = loss_vec.at[i].set(obj - opt_obj)
+    loss_vec = loss_vec.at[i].set(diff)
+    # loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 
@@ -382,6 +383,7 @@ def fp_eval_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_step
     # obj = .5 * jnp.linalg.norm(A @ z - c) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
     # opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
     obj = .5 * z @ P @ z + c @ z
+    # obj = .5 * y @ P @ y + c @ y
     opt_obj = .5 * z_star @ P @ z_star + c @ z_star
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
 

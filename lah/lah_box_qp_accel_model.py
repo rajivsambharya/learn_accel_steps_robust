@@ -86,7 +86,9 @@ class LAHBOXQPAccelmodel(L2Omodel):
         # pdb.set_trace()
 
         # e2e_loss_fn = self.create_end2end_loss_fn
-        self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        # self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        import pdb
+        pdb.set_trace()
 
 
 
@@ -98,10 +100,11 @@ class LAHBOXQPAccelmodel(L2Omodel):
     #     opt_vals = batch_f(self.z_stars_train, self.theta)
 
     def transform_params(self, params, n_iters):
-        transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
-        transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:, :]))
-        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
-        return transformed_params
+        # transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
+        # transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:, :]))
+        # # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        # return transformed_params
+        return jnp.exp(params[0])
 
     def perturb_params(self):
         # init step-varying params
@@ -169,34 +172,33 @@ class LAHBOXQPAccelmodel(L2Omodel):
         return penalty
 
     def init_params(self):
+        k = self.eval_unrolls
         # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.step_varying_num)
         
         # init step-varying params
         # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
-        step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
-        # step_varying_params = step_varying_params.at[0,0].set(jnp.log(1.1 / self.smooth_param))
-        # step_varying_params = step_varying_params.at[1,0].set(jnp.log(1.5 / self.smooth_param))
+        step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((k, 2))
+        
+        if self.smooth_param / self.str_cvx_param >= 1e5:
+            
+            t_params = jnp.ones(k)
+            t = 1
+            for i in range(1, k):
+                t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+                t_params = t_params.at[i].set(t) #(jnp.log(t))
+            beta_params = convert_t_to_beta(t_params)
+            step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
+        else:
+            kappa = self.smooth_param / self.str_cvx_param
+            step_varying_params = step_varying_params.at[:, 1].set(jnp.log((kappa**.5-1) / (kappa**.5+1)))
 
-        t_params = jnp.ones(self.step_varying_num)
-        t = 1
-        for i in range(1, self.step_varying_num):
-            t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
-            t_params = t_params.at[i].set(t) #(jnp.log(t))
-        beta_params = convert_t_to_beta(t_params)
-        step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
-        # step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
-        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
-
-        # init steady_state_params
-        steady_state_params = 0 * jnp.ones((1, 2))
-        # steady_state_params = 0 * jnp.ones((1, 2)) #sigmoid_inv(1 / (self.smooth_param)) * jnp.ones((1, 1))
-
-        self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+        # self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+        self.params = [jnp.vstack([step_varying_params])]
         
         # sigmoid_inv(beta)
 
     def create_quad_prox_pep_sdp_layer(self, num_iters):     # def k_step_rate_subdiff(L, mu, step_sizes, proj=True):
-        """
+        """ d
         ordering: x*, x_0,...,x_{p-1}, s*,s_0,..,s_{p-1}
         """
         proj = True
@@ -548,8 +550,19 @@ class LAHBOXQPAccelmodel(L2Omodel):
                     # for step-varying training
                     # params[0] = params[0].at[-1,0].set()
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
-                    stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
-                    stochastic_params = stochastic_params.at[-1,1].set(.9)
+                    # t_params = jnp.ones(n_iters)
+                    # t = 1
+                    # for i in range(1, n_iters):
+                    #     t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+                    #     t_params = t_params.at[i].set(t) #(jnp.log(t))
+                    # beta_params = convert_t_to_beta(t_params)
+                    # stochastic_params = stochastic_params.at[:, 1].set(beta_params)
+                    # kappa = self.smooth_param / self.str_cvx_param
+                    # stochastic_params = stochastic_params.at[:, 1].set((kappa**.5-1) / (kappa**.5+1))
+                    
+                    
+                    # stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
+                    # stochastic_params = stochastic_params.at[-1,1].set(.9)
             else:
                 if special_algo == 'silver' or special_algo == 'conj_grad':
                     stochastic_params = params[0]
@@ -634,8 +647,12 @@ class LAHBOXQPAccelmodel(L2Omodel):
         
         # Instantiate PEP
         problem = PEP()
-        mu = 0
+        mu = self.str_cvx_param._value
+        if mu <= 1e-6:
+            mu = 0
         L = self.smooth_param._value
+        # import pdb
+        # pdb.set_trace()
 
         # Declare a strongly convex smooth function and a convex function
         f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
@@ -672,7 +689,7 @@ class LAHBOXQPAccelmodel(L2Omodel):
         verbose = 1
         pepit_verbose = max(verbose, 0)
         try:
-            pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+            pepit_tau = problem.solve(verbose=2, solver=cp.MOSEK)
         except Exception as e:
             print('exception', e)
             pepit_tau = 0

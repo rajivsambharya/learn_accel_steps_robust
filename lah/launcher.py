@@ -432,16 +432,21 @@ class Workspace:
                                        algo_dict=input_dict)
         
     def create_lah_box_qp_accel_model(self, cfg, static_dict):
-        # get A, lambd, ista_step
-        A = static_dict['A']
-        P = A.T @ A
-        lambd = static_dict['lambd']
+        if 'A' in static_dict.keys():
+            # get A, lambd, ista_step
+            A = static_dict['A']
+            P = A.T @ A
+            lambd = static_dict['lambd']
+            # transform q_mat_train and q_mat_test
+            self.q_mat_train = (-A.T @ self.q_mat_train.T + lambd).T
+            self.q_mat_test = (-A.T @ self.q_mat_test.T + lambd).T
+        else:
+            P = static_dict['P']
+            lambd = 0
         l = static_dict['l']
         u = static_dict['u']
 
-        # transform q_mat_train and q_mat_test
-        self.q_mat_train = (-A.T @ self.q_mat_train.T + lambd).T
-        self.q_mat_test = (-A.T @ self.q_mat_test.T + lambd).T
+        
         
 
         input_dict = dict(algorithm='lah_box_qp_accel',
@@ -872,8 +877,8 @@ class Workspace:
         if 'q_mat' in jnp_load_obj.keys():
             q_mat = jnp.array(jnp_load_obj['q_mat'])
 
-            # rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
-            rand_indices = np.arange(N)
+            rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
+            # rand_indices = np.arange(N)
 
             # self.train_indices = rand_indices[:N_train]
             self.train_indices = rand_indices[N_test: N_test + N_train]
@@ -1366,23 +1371,23 @@ class Workspace:
 
 
     def eval_iters_train_and_test(self, col, new_start_index):
-        try:
-            pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
-            print('PEPLOSS', pep_loss)
+        # try:
+        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+        #     print('PEPLOSS', pep_loss)
             
-            # now save the result
-            try:
-                pep_df = pd.read_csv(self.pep_filename)
-            except FileNotFoundError:
-                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
-            write_pep(pep_df, self.pep_filename, col, pep_loss)
-        except Exception as e:
-            print('exception', e)
-            try:
-                pep_df = pd.read_csv(self.pep_filename)
-            except FileNotFoundError:
-                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
-            write_pep(pep_df, self.pep_filename, col, 99999)
+        #     # now save the result
+        #     try:
+        #         pep_df = pd.read_csv(self.pep_filename)
+        #     except FileNotFoundError:
+        #         pep_df = pd.DataFrame(columns=['col', 'pep_val'])
+        #     write_pep(pep_df, self.pep_filename, col, pep_loss)
+        # except Exception as e:
+        #     print('exception', e)
+        #     try:
+        #         pep_df = pd.read_csv(self.pep_filename)
+        #     except FileNotFoundError:
+        #         pep_df = pd.DataFrame(columns=['col', 'pep_val'])
+        #     write_pep(pep_df, self.pep_filename, col, 99999)
         
         self.evaluate_iters(
             self.num_samples_test, col, train=False)
