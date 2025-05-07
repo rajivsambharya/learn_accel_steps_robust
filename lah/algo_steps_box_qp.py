@@ -337,12 +337,12 @@ def fp_train_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_ste
     # diff = jnp.linalg.norm(z_next - z) ** 2
     obj = .5 * z @ P @ z + c @ z
     opt_obj = .5 * z_star @ P @ z_star + c @ z_star
-    loss_vec = loss_vec.at[i].set(diff)
-    # loss_vec = loss_vec.at[i].set(obj - opt_obj)
+    # loss_vec = loss_vec.at[i].set(diff)
+    loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 
-def k_steps_eval_lah_accel_box_qp(k, z0, P, q, l, u, params, supervised, z_star, jit):
+def k_steps_eval_lah_accel_box_qp(k, z0, P, q, l, u, params, supervised, z_star, jit, calc_subopt=True):
     iter_losses = jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
@@ -354,7 +354,8 @@ def k_steps_eval_lah_accel_box_qp(k, z0, P, q, l, u, params, supervised, z_star,
                               c=q,
                               l=l,
                               u=u,
-                              box_qp_steps=params
+                              box_qp_steps=params,
+                              calc_subopt=calc_subopt
                               )
     z_all = jnp.zeros((k, z0.size))
     obj_diffs = jnp.zeros(k)
@@ -369,7 +370,7 @@ def k_steps_eval_lah_accel_box_qp(k, z0, P, q, l, u, params, supervised, z_star,
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 
 
-def fp_eval_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_steps):
+def fp_eval_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_steps, calc_subopt=False):
     z, y, t, loss_vec, obj_diffs, z_all = val
     z_next, y_next, t_next = fixed_point_accel_box_qp_beta(
         z, y, box_qp_steps[i, 1], P, c, l, u, box_qp_steps[i, 0])
@@ -384,7 +385,10 @@ def fp_eval_lah_accel_box_qp(i, val, supervised, z_star, P, c, l, u, box_qp_step
     # opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
     obj = .5 * z @ P @ z + c @ z
     # obj = .5 * y @ P @ y + c @ y
-    opt_obj = .5 * z_star @ P @ z_star + c @ z_star
+    if calc_subopt:
+        opt_obj = .5 * z_star @ P @ z_star + c @ z_star
+    else:
+        opt_obj = 0
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
 
     z_all = z_all.at[i, :].set(z_next)

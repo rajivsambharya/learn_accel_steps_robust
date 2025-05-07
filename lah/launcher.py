@@ -440,9 +440,16 @@ class Workspace:
             # transform q_mat_train and q_mat_test
             self.q_mat_train = (-A.T @ self.q_mat_train.T + lambd).T
             self.q_mat_test = (-A.T @ self.q_mat_test.T + lambd).T
-        else:
+            dynamic = False
+        elif 'P' in static_dict.keys():
             P = static_dict['P']
             lambd = 0
+            dynamic = False
+        else:
+            P = None
+            lambd = 0
+            dynamic = True
+            
         l = static_dict['l']
         u = static_dict['u']
 
@@ -453,6 +460,7 @@ class Workspace:
                           c_mat_train=self.q_mat_train,
                           c_mat_test=self.q_mat_test,
                           lambd=lambd,
+                          dynamic=dynamic,
                           P=P,
                           l=l,
                           u=u
@@ -908,9 +916,9 @@ class Workspace:
 
 
         # load the closed_loop_rollout trajectories
-        if 'ref_traj_tensor' in jnp_load_obj.keys():
-            # load all of the goals
-            self.closed_loop_rollout_dict['ref_traj_tensor'] = jnp_load_obj['ref_traj_tensor']
+        # if 'ref_traj_tensor' in jnp_load_obj.keys():
+        #     # load all of the goals
+        #     self.closed_loop_rollout_dict['ref_traj_tensor'] = jnp_load_obj['ref_traj_tensor']
 
         return jnp_load_obj
 
@@ -1372,7 +1380,8 @@ class Workspace:
 
     def eval_iters_train_and_test(self, col, new_start_index):
         # try:
-        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+        #     # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:30,:])))
         #     print('PEPLOSS', pep_loss)
             
         #     # now save the result

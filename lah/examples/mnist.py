@@ -77,7 +77,8 @@ def run(run_cfg, model='lah'):
     # elif model == 'lm':
     #     algo = 'lm_osqp'
     if model == 'lah':
-        algo = 'lah_accel_box_qp'
+        # algo = 'lah_accel_box_qp'
+        algo = 'lah_ista'
     elif model == 'l2ws':
         algo = 'ista'
     elif model == 'lm':

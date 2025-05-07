@@ -79,7 +79,7 @@ class LAHISTAmodel(L2Omodel):
         self.num_pep_iters = self.train_unrolls
 
         # e2e_loss_fn = self.create_end2end_loss_fn
-        self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        # self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
 
 
 

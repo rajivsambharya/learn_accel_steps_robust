@@ -1,6 +1,6 @@
 model: lasco
 nn_cfg:
-  lr: 1e-2
+  lr: 1e-3
   method: adam
   batch_size: 1000
   epochs: 2000
@@ -9,23 +9,23 @@ nn_cfg:
 data:
   datetime: ''
 
-train_unrolls: 40
-eval_unrolls: 100
+train_unrolls: 300
+eval_unrolls: 500
 eval_every_x_epochs: 50
 save_every_x_epochs: 1
 test_every_x_epochs: 1
 write_csv_every_x_batches: 1
 epochs_jit: 2
 N_train: 10 #00
-N_test: 1000
+N_test: 10
 N_val: 10
 # num_samples: 10
 num_samples_train: 10
-num_samples_test: 1000
+num_samples_test: 10
 supervised: True
-plot_iterates: [0, 10, 900]
-loss_method: 'fixed_k'
+plot_iterates: [0, 20, 30, 40]
+loss_method: 'constant_sum'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 10
+pep_regularizer_coeff: 0
 pep_target: 0.1

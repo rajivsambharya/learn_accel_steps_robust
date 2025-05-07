@@ -1,5 +1,5 @@
 nn_cfg:
-  lr: 1e-3
+  lr: 1e-2
   method: adam
   intermediate_layer_sizes: []
   batch_size: 1000
@@ -9,16 +9,16 @@ nn_cfg:
 data:
   datetime: ''
 
-eval_every_x_epochs: 20
+eval_every_x_epochs: 50
 save_every_x_epochs: 1
 test_every_x_epochs: 1
 write_csv_every_x_batches: 1
 epochs_jit: 2
 
-N_train: 20
+N_train: 10
 N_test: 10
 N_val: 0
-num_samples_train: 20
+num_samples_train: 10
 num_samples_test: 10
 # num_const_steps: 1
 
@@ -40,9 +40,9 @@ iterates_visualize: [3, 4, 5]
 vis_num: 5
 skip_startup: False
 
-eval_unrolls: 600 #40000
+eval_unrolls: 100 #40000
 supervised: True
-train_unrolls: 500
+train_unrolls: 60
 
 custom_loss: False #True
 algo: lah

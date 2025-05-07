@@ -15,7 +15,7 @@ import cvxpy as cp
 from cvxpylayers.jax import CvxpyLayer
 
 from PEPit import PEP
-from PEPit.functions import SmoothStronglyConvexFunction
+from PEPit.functions import SmoothStronglyConvexFunction, SmoothStronglyConvexQuadraticFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
@@ -31,64 +31,66 @@ class LAHBOXQPAccelmodel(L2Omodel):
         self.algo = 'lah_box_qp_accel'
         self.factors_required = False
         
-        # self.q_mat_train, self.q_mat_test = input_dict['b_mat_train'], input_dict['b_mat_test']
-        # D, W = input_dict['D'], input_dict['W']
-        # A = input_dict['A']
-        # lambd = input_dict['lambd']
-        # self.A = A
-        self.P = input_dict['P']
+        
         self.l, self.u = input_dict['l'], input_dict['u']
-        # self.lambd = lambd
-
+        self.n = self.l.size
         self.q_mat_train, self.q_mat_test = input_dict['c_mat_train'], input_dict['c_mat_test']
-        # self.D, self.W = D, W
-        # self.m, self.n = A.shape
-        self.n = self.P.shape[0]
-        self.output_size = self.n
+        
+        self.dynamic = input_dict.get('dynamic', False)
+        
+        if self.dynamic:
+            # self.P = input_dict['P']
+            all_evals = []
+            N = self.q_mat_train.shape[0]
+            for i in range(N):
+                P0 = jnp.reshape(self.q_mat_train[i, self.n:], (self.n, self.n))
+                evals, evecs = jnp.linalg.eigh(P0)
+                all_evals.append(evals)
+            for i in range(N):
+                P0 = jnp.reshape(self.q_mat_test[i, self.n:], (self.n, self.n))
+                evals, evecs = jnp.linalg.eigh(P0)
+                all_evals.append(evals)
+            
+            self.output_size = self.n
 
-        # evals, evecs = jnp.linalg.eigh(D.T @ D)
-        # lambd = 0.1
-        # self.ista_step = lambd / evals.max()
-        # p = jnp.diag(P)
-        # cond_num = jnp.max(p) / jnp.min(p)
-        evals, evecs = jnp.linalg.eigh(self.P)
-        self.evals = evals
+            # evals, evecs = jnp.linalg.eigh(self.P)
+            # self.evals = evals
 
-        self.str_cvx_param = jnp.min(evals)
-        self.smooth_param = jnp.max(evals)
+            self.str_cvx_param = jnp.min(jnp.stack(all_evals)) * 10
+            self.smooth_param = jnp.max(jnp.stack(all_evals))
 
-        cond_num = self.smooth_param / self.str_cvx_param
-
-        safeguard_step = 1 / self.smooth_param
-
-        # self.k_steps_train_fn = partial(k_steps_train_lah_ista, lambd=lambd, A=A,
-        #                                 jit=self.jit)
-        # self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
-        #                                jit=self.jit)
-        self.k_steps_train_fn = partial(k_steps_train_lah_accel_box_qp, P=self.P, l=self.l, u=self.u,
+            self.k_steps_train_fn = partial(k_steps_train_lah_accel_box_qp, l=self.l, u=self.u,
+                                            jit=self.jit)
+            self.k_steps_eval_fn = partial(k_steps_eval_lah_accel_box_qp, l=self.l, u=self.u,
                                         jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_lah_accel_box_qp, P=self.P, l=self.l, u=self.u,
-                                       jit=self.jit)
-        # self.nesterov_eval_fn = partial(k_steps_eval_fista, lambd=lambd, A=A,
-        #                                jit=self.jit)
+            
+        else:
+            self.P = input_dict['P']
+            
+            self.output_size = self.n
+
+            evals, evecs = jnp.linalg.eigh(self.P)
+            self.evals = evals
+
+            self.str_cvx_param = jnp.min(evals)
+            self.smooth_param = jnp.max(evals)
+
+            self.k_steps_train_fn = partial(k_steps_train_lah_accel_box_qp, P=self.P, l=self.l, u=self.u,
+                                            jit=self.jit)
+            self.k_steps_eval_fn = partial(k_steps_eval_lah_accel_box_qp, P=self.P, l=self.l, u=self.u,
+                                        jit=self.jit)
 
         self.out_axes_length = 5
 
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, self.n))
         
-         #20)
-        # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
-        # self.pep_layer = self.create_quad_prox_pep_sdp_layer(self.train_unrolls)
-        # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
         self.num_pep_iters = self.train_unrolls
-        # import pdb
-        # pdb.set_trace()
 
         # e2e_loss_fn = self.create_end2end_loss_fn
         # self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
-        import pdb
-        pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
 
 
 
@@ -550,19 +552,7 @@ class LAHBOXQPAccelmodel(L2Omodel):
                     # for step-varying training
                     # params[0] = params[0].at[-1,0].set()
                     stochastic_params = jnp.exp(params[0][:n_iters, :])
-                    # t_params = jnp.ones(n_iters)
-                    # t = 1
-                    # for i in range(1, n_iters):
-                    #     t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
-                    #     t_params = t_params.at[i].set(t) #(jnp.log(t))
-                    # beta_params = convert_t_to_beta(t_params)
-                    # stochastic_params = stochastic_params.at[:, 1].set(beta_params)
-                    # kappa = self.smooth_param / self.str_cvx_param
-                    # stochastic_params = stochastic_params.at[:, 1].set((kappa**.5-1) / (kappa**.5+1))
-                    
-                    
-                    # stochastic_params = stochastic_params.at[-1,0].set(1 / self.smooth_param)
-                    # stochastic_params = stochastic_params.at[-1,1].set(.9)
+
             else:
                 if special_algo == 'silver' or special_algo == 'conj_grad':
                     stochastic_params = params[0]
@@ -606,23 +596,48 @@ class LAHBOXQPAccelmodel(L2Omodel):
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
                 angles = None
             else:
-                if diff_required:
-                    z_final, iter_losses = train_fn(k=iters,
-                                                    z0=z0,
-                                                    y0=z0,
-                                                    q=q,
-                                                    params=stochastic_params,
-                                                    supervised=supervised,
-                                                    z_star=z_star)
+                if self.dynamic:
+                    
+                    P = jnp.reshape(q[self.n:], (self.n, self.n))
+                    c = jnp.reshape(q[:self.n], (self.n))
+
+                    if diff_required:
+                        z_final, iter_losses = train_fn(k=iters,
+                                                        z0=z0,
+                                                        y0=z0,
+                                                        P=P,
+                                                        q=c,
+                                                        params=stochastic_params,
+                                                        supervised=supervised,
+                                                        z_star=z_star)
+                    else:
+                        eval_out = eval_fn(k=iters,
+                                        z0=z0,
+                                        P=P,
+                                        q=c,
+                                        params=stochastic_params,
+                                        supervised=supervised,
+                                        z_star=z_star)
+                        z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+                        angles = None
                 else:
-                    eval_out = eval_fn(k=iters,
-                                       z0=z0,
-                                       q=q,
-                                       params=stochastic_params,
-                                       supervised=supervised,
-                                       z_star=z_star)
-                    z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
-                    angles = None
+                    if diff_required:
+                        z_final, iter_losses = train_fn(k=iters,
+                                                        z0=z0,
+                                                        y0=z0,
+                                                        q=q,
+                                                        params=stochastic_params,
+                                                        supervised=supervised,
+                                                        z_star=z_star)
+                    else:
+                        eval_out = eval_fn(k=iters,
+                                        z0=z0,
+                                        q=q,
+                                        params=stochastic_params,
+                                        supervised=supervised,
+                                        z_star=z_star)
+                        z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+                        angles = None
 
             loss = self.final_loss(loss_method, z_final,
                                    iter_losses, supervised, z0, z_star)
@@ -655,10 +670,11 @@ class LAHBOXQPAccelmodel(L2Omodel):
         # pdb.set_trace()
 
         # Declare a strongly convex smooth function and a convex function
-        f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
+        # f = problem.declare_function(SmoothStronglyConvexFunction, mu=mu, L=L)
+        f = problem.declare_function(SmoothStronglyConvexQuadraticFunction, mu=mu, L=L)
         # f = problem.declare_function(SymmetricLinearOperator, mu=mu, L=L)
-        # h = problem.declare_function(ConvexIndicatorFunction)
-        h = problem.declare_function(ConvexFunction)
+        h = problem.declare_function(ConvexIndicatorFunction)
+        # h = problem.declare_function(ConvexFunction)
         F = f + h
 
         # Start by defining its unique optimal point xs = x_* and its function value Fs = F(x_*)
@@ -670,7 +686,8 @@ class LAHBOXQPAccelmodel(L2Omodel):
 
         # Set the initial constraint that is the distance between x0 and x^*
         problem.set_initial_condition((x0 - xs) ** 2 <= 1)
-
+        problem.set_initial_condition((F(x0) - Fs)  <= 1)
+        
         # Compute n steps of the accelerated proximal gradient method starting from x0
         x_new = x0
         y = x0
@@ -681,6 +698,7 @@ class LAHBOXQPAccelmodel(L2Omodel):
 
         # Set the performance metric to the function value accuracy
         problem.set_performance_metric((f(x_new) + hx_new) - Fs)
+        # problem.set_performance_metric((x_new - xs)**2)
         
         # import pdb
         # pdb.set_trace()
@@ -888,7 +906,5 @@ def convert_t_to_beta(t_vals):
     beta_vals = jnp.ones(t_vals.size)
     for i in range(1, t_vals.size):
         beta_vals = beta_vals.at[i-1].set((t_vals[i-1] - 1) / t_vals[i])
-    # import pdb
-    # pdb.set_trace()
     return beta_vals
 

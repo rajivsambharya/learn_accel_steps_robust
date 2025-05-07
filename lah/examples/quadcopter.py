@@ -19,6 +19,8 @@ from lah.algo_steps_box_qp import k_steps_eval_lah_accel_box_qp
 import imageio
 import time
 from scipy.interpolate import splprep, splev
+import hydra
+from pandas import read_csv
 
 QUADCOPTER_NX = 10
 QUADCOPTER_NU = 4
@@ -38,6 +40,31 @@ def run(run_cfg):
 
     # set the seed
     np.random.seed(setup_cfg['seed'])
+    
+    du_min = -jnp.array(setup_cfg['delta_u'])
+    du_max = jnp.array(setup_cfg['delta_u'])
+    T = setup_cfg['T']
+    l = np.tile(du_min, T)
+    u = np.tile(du_max, T)
+    
+    # n = P.shape[0]
+    # l = -np.ones(n) * setup_cfg['w_max']
+    # l[:4] = -np.inf
+    # u = np.ones(n) * setup_cfg['w_max']
+    # u[:4] = np.inf
+    static_dict = dict(l=jnp.array(l), u=jnp.array(u))
+
+    # we directly save q now
+    static_flag = True
+    algo = 'lah_accel_box_qp'
+    
+    # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
+    # workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, custom_visualize_fn=vis_fn)
+    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
+
+    # run the workspace
+    workspace.run()
+    return
 
     # setup the training
     T, dt = setup_cfg['T'], setup_cfg['dt']
@@ -252,8 +279,7 @@ def setup_probs(setup_cfg):
     # static_canon_mpc_osqp_partial = partial(static_canon_mpc_osqp, T=T, nx=nx, nu=nu,
     #                                     x_min=x_min, x_max=x_max, u_min=u_min,
     #                                     u_max=u_max, Q=Q, QT=QT, R=R, delta_u=delta_u)
-    import pdb
-    pdb.set_trace()
+
     static_canon_mpc_osqp_partial = partial(static_canon_mpc_du_qp, T=T, nx=nx, nu=nu, du_min=-delta_u, du_max=delta_u, Q=Q, QT=QT, R=R)
     # static_canon_mpc_osqp_partial = partial(static_canon_mpc_box_qp, T=T, nx=nx, nu=nu,
     #                                     u_min=u_min, u_max=u_max, Q=Q, QT=QT, R=R)
@@ -365,9 +391,10 @@ def compile_rollout_results(rollout_results_list, T, transform=False):
     nx = x0_list[0].size
     nu = u0_list[0].size
     
-    m, n = A_list[0].shape
-    for i in range(len(rollout_results_list)):
-        pass
+    n = P_list[0].shape[0]
+    # m, n = A_list[0].shape
+    # for i in range(len(rollout_results_list)):
+    #     pass
 
     # get theta
     t2 = time.time()
@@ -390,21 +417,21 @@ def compile_rollout_results(rollout_results_list, T, transform=False):
 
     # new
     theta_mat = jnp.zeros((N, T * 3 + nx + nu))
-    for i in range(N):
-        x0 = x0_list[i]
-        theta_mat = theta_mat.at[i, :nx].set(x0)
-        theta_mat = theta_mat.at[i, nx: nx + nu].set(u0_list[i])
+    # for i in range(N):
+    #     x0 = x0_list[i]
+    #     theta_mat = theta_mat.at[i, :nx].set(x0)
+    #     theta_mat = theta_mat.at[i, nx: nx + nu].set(u0_list[i])
 
-        x_ref_pos = x_ref_list[i][:, :3]
-        theta_mat = theta_mat.at[i, nx + nu:].set(jnp.ravel(x_ref_pos))
-    if transform:
-        theta_mat = theta_mat[:, 3:]
+    #     x_ref_pos = x_ref_list[i][:, :3]
+    #     theta_mat = theta_mat.at[i, nx + nu:].set(jnp.ravel(x_ref_pos))
+    # if transform:
+    #     theta_mat = theta_mat[:, 3:]
     t3 = time.time()
     print('theta time', t3 - t2)
 
     # get z_stars
     t4 = time.time()
-    z_stars = jnp.zeros((N, 2 * m + n))
+    z_stars = jnp.zeros((N, n))
     for i in range(N):
         z_stars = z_stars.at[i, :].set(sol_list[i])
     t5 = time.time()
@@ -412,25 +439,28 @@ def compile_rollout_results(rollout_results_list, T, transform=False):
 
     # form q_mat
     nc2 = int(n * (n + 1) / 2)
-    q_mat = jnp.zeros((N, 2 * m + n + nc2 + m * n))
+    # q_mat = jnp.zeros((N, n + nc2))
+    q_mat = jnp.zeros((N, n + n**2))
     t6 = time.time()
 
     # P stays the same for all problems
-    P = vec_symm(P_list[0])
-    q_mat = q_mat.at[:, n + 2 * m: n + 2 * m + nc2].set(P)
+    # P = vec_symm(P_list[0]) A_tensor = jnp.stack(A_list)
+    
+    # q_mat = q_mat.at[:, n:].set(P)
     clu_mat = jnp.stack(clu_list)
-    A_tensor = jnp.stack(A_list)
-    q_mat = q_mat.at[:, :n + 2 * m].set(clu_mat)
-    q_mat = q_mat.at[:, n + 2 * m + nc2:].set(jnp.reshape(A_tensor, (N, m * n)))
-    # for i in range(N):
-    #     q_mat = q_mat.at[i, :n + 2 * m].set(clu_list[i])
-    #     q_mat = q_mat.at[i, n + 2 * m + nc2:].set(jnp.reshape(A_list[i], (m * n)))
+    q_mat = q_mat.at[:, :n].set(clu_mat)
+    # q_mat = q_mat.at[:, n + 2 * m + nc2:].set(jnp.reshape(A_tensor, (N, m * n)))
+    for i in range(N):
+        q_mat = q_mat.at[i, n:].set(jnp.reshape(P_list[i], (n**2)))
+        # q_mat = q_mat.at[i, n**2:].set(clu_list[i])
     t7 = time.time()
     print('q mat time', t7 - t6)
 
 
     # form factors
     factors = (jnp.stack([factor_list[i][0] for i in range(N)]), jnp.stack([factor_list[i][1] for i in range(N)]))
+    import pdb
+    pdb.set_trace()
     return theta_mat, z_stars, q_mat, factors
 
 
@@ -502,8 +532,8 @@ def opt_box_qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol, cd0, st
     nx = x0.size
     Ad = jnp.eye(nx) + Ac * dt
     Bd = Bc * dt
-    print('Ad', Ad)
-    print('Bd', Bd)
+    # print('Ad', Ad)
+    # print('Bd', Bd)
 
     # get the constants for the discrete system
     cd = cd0 + (x_dot - Ac @ x0 - Bc @ u0) * dt
@@ -534,10 +564,22 @@ def opt_box_qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol, cd0, st
     # step_sizes = 1 / L * jnp.ones(budget)
     step_sizes = 4 / (mu + 3*L) * jnp.ones(budget)
     momentum_sizes = (((3 * L / mu + 1)**.5 - 2) / ((3 * L / mu + 1)**.5 + 2)) * jnp.ones(budget)
-    params = jnp.vstack([step_sizes, momentum_sizes]).T
+    # step_sizes = 1 / L * jnp.ones(budget)
+    # t = 1
+    # t_params = jnp.ones(budget)
+    # for i in range(1, budget):
+    #     t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+    #     t_params = t_params.at[i].set(t) #(jnp.log(t))
+    # momentum_sizes = convert_t_to_beta(t_params)
+    # dt = '2025-05-06/13-16-22'
+    # params_out = recover_step_sizes_data('quadcopter', dt, 'lah')
+    # step_sizes = jnp.array(params_out.to_numpy()[:, 1])
+    # momentum_sizes = jnp.array(params_out.to_numpy()[:, 2])
     # import pdb
     # pdb.set_trace()
-    out = k_steps_eval_lah_accel_box_qp(budget, z0, P, c, l, u, params, supervised=False, z_star=None, jit=True)
+    params = jnp.vstack([step_sizes, momentum_sizes]).T
+
+    out = k_steps_eval_lah_accel_box_qp(budget, z0, P, c, l, u, params, supervised=False, z_star=None, jit=True, calc_subopt=False)
     sol = out[0]
     print('loss', out[1][-1])
     if out[1][-1] > .001:
@@ -562,6 +604,56 @@ def opt_box_qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol, cd0, st
 
     return sol, P, c, l, u
 
+def recover_step_sizes_data(example, dt, method):
+    orig_cwd = hydra.utils.get_original_cwd()
+    dt_path = f"{orig_cwd}/outputs/{example}/train_outputs/{dt}"
+    df = read_step_size_data(dt_path, method)
+    # df = read_csv(f"{path}/{filename}")
+    # data = get_eval_array(df, col)
+    return df
+
+
+def read_step_size_data(dt_path, method):
+    if method == 'nesterov':
+        # df = read_csv(f"{dt_path}/lah_weights/nesterov/params.csv")
+        df = read_csv(f"{dt_path}/lah_weights/no_train/params.csv")
+    elif method == 'silver':
+        df = read_csv(f"{dt_path}/lah_weights/silver/params.csv")
+    elif method == 'cold_start':
+        df = read_csv(f"{dt_path}/lah_weights/no_train/params.csv")
+    elif method == 'nearest_neighbor':
+        df = read_csv(f"{dt_path}/lah_weights/nearest_neighbor/params.csv")
+    # elif method == 'lah':
+    elif method[:3] == 'lah':
+        # get all of the folder starting with 'train_epoch_...'
+        # all_train_epoch_folders = 
+        last_folder = find_last_folder_starting_with(f"{dt_path}/lah_weights", 'train_epoch')
+        df = read_csv(f"{dt_path}/lah_weights/{last_folder}/params.csv") #read_csv(f"{dt_path}/lah_weights/silver/params.csv")
+    else:
+        df = None
+    return df
+
+def find_last_folder_starting_with(directory, prefix):
+    # List all directories in the specified directory that start with the given prefix
+    folders = [name for name in os.listdir(directory) if os.path.isdir(os.path.join(directory, name)) and name.startswith(prefix)]
+    # Return the last folder alphabetically
+    max_val = 0
+    for i in range(len(folders)):
+        if 'final' in folders[i]:
+            curr_val = int(folders[i][12:-6])
+        else:
+            curr_val = int(folders[i][12:])
+        if curr_val > max_val:
+            max_val = curr_val
+            last_folder = folders[i]
+    return last_folder
+
+
+def convert_t_to_beta(t_vals):
+    beta_vals = jnp.ones(t_vals.size)
+    for i in range(1, t_vals.size):
+        beta_vals = beta_vals.at[i-1].set((t_vals[i-1] - 1) / t_vals[i])
+    return beta_vals
 
 
 def solve_full_mpc(x_ref, x0, Ad, Bd, cd, T, nx, nu, u_min, u_max, Q, QT, R, solver='OSQP'):

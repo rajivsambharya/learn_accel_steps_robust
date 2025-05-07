@@ -36,6 +36,7 @@ def save_results_dynamic(output_filename, theta_mat, z_stars, q_mat, factors, re
         jnp.savez(
             output_filename,
             thetas=jnp.array(theta_mat),
+            q_mat=q_mat,
             z_stars=z_stars#,
             # factors0=factors[0],
             # factors1=factors[1]
@@ -44,6 +45,7 @@ def save_results_dynamic(output_filename, theta_mat, z_stars, q_mat, factors, re
         jnp.savez(
             output_filename,
             thetas=jnp.array(theta_mat),
+            q_mat=q_mat,
             z_stars=z_stars,
             ref_traj_tensor=ref_traj_tensor
             #,

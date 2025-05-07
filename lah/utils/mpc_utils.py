@@ -7,6 +7,7 @@ from scipy import sparse
 from trajax import integrators
 from scipy.linalg import block_diag
 import scipy.sparse as sp
+import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +104,10 @@ def closed_loop_rollout(qp_solver, sim_len, x_init_traj, u0, dynamics,
 
         print('ref_traj', ref_traj)
         x_dot = dynamics(x0, u0, j)
-        sol, P, A, factor, q = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
+        sol, P, q, l, u = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
+        A = l
+        factor = u
+        # sol, P, A, factor, q = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
         sols.append(sol)
         P_list.append(P)
         A_list.append(A)
@@ -414,8 +418,11 @@ def static_canon_mpc_du_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, du_min, du_max, Q, 
         d[t * nx:(t + 1) * nx] = A_t_x0 + u0_effect + cd_sum
 
     # --- 3. Cost matrices ---
-    Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
-    R_blk = block_diag(*([R] * T))
+    # Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
+    # R_blk = block_diag(*([R] * T))
+    gamma = 0.9  # example discount factor
+    R_blk = block_diag(*[gamma**t * R for t in range(T)])
+    Q_blk = block_diag(*[gamma**t * Q for t in range(T - 1)] + [gamma**(T-1) * QT])
 
     # Reference trajectory stacked
     x_ref_stack = x_ref[1:].reshape(T * nx)
@@ -427,6 +434,8 @@ def static_canon_mpc_du_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, du_min, du_max, Q, 
     # Box constraints on delta u
     l = np.tile(du_min, T)
     u = np.tile(du_max, T)
+    # import pdb
+    # pdb.set_trace()
 
     return {'P': P, 'c': c, 'l': l, 'u': u, 'S': S, 'd': d, 'Q_blk': Q_blk, 'A_cumsum': A_cumsum}
 
@@ -457,7 +466,7 @@ def static_canon_mpc_box_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, u_min, u_max, Q, Q
     D = sp.coo_matrix((data, (rows, cols)), shape=((T - 1) * nu, T * nu)).tocsr()
 
     # Smoothness penalty
-    lambda_init = .00001
+    lambda_init = 1
     smooth_penalty = lambda_init * (D.T @ D)
 
     Q_blk = block_diag(*([Q] * (T - 1) + [QT]))

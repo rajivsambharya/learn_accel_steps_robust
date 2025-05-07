@@ -322,7 +322,9 @@ def fp_train_lah_fista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     z_next, y_next, t_next = fixed_point_fista_beta(z, y, ista_steps[i,1], A, c, lambd, ista_steps[i,0])
     diff = jnp.linalg.norm(z_next - z_star) ** 2
     # diff = jnp.linalg.norm(z_next - z) ** 2
-    loss_vec = loss_vec.at[i].set(diff)
+    obj = .5 * jnp.linalg.norm(A @ z - c) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
+    opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
+    loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 

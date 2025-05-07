@@ -1,5 +1,5 @@
 nn_cfg:
-  lr: 1e-2
+  lr: 1e-3
   method: adam
   batch_size: 10
   epochs: 5000
@@ -11,7 +11,7 @@ data:
 num_const_steps: 1
 
 
-eval_unrolls: 300
+eval_unrolls: 1000
 eval_every_x_epochs: 100
 save_every_x_epochs: 1
 # test_every_x_epochs: 10
@@ -39,7 +39,7 @@ iterates_visualize: [20]
 save_weights_flag: False #True
 vis_num: 500
 supervised: True
-train_unrolls: 40
+train_unrolls: 100
 skip_startup: False
 
 
