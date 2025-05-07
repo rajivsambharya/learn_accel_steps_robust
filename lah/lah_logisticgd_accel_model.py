@@ -5,7 +5,7 @@ from jax import random, vmap
 
 import numpy as np
 
-from lah.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient
+from lah.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic
 from lah.l2o_model import L2Omodel
 from PEPit.functions import SmoothStronglyConvexFunction
 import cvxpy as cp
@@ -48,6 +48,10 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_nesterov_logisticgd, num_points=num_points,
                                        jit=self.jit)
+        # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=0.001, beta1=0.9, beta2=0.99, epsilon=1e-8,
+        #                                jit=self.jit)
+        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
+                                       jit=self.jit)
 
         self.out_axes_length = 5
 
@@ -61,12 +65,14 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
                                                special_algo='silver')
+        self.loss_fn_eval_adam = e2e_loss_fn(bypass_nn=False, diff_required=False, 
+                                               special_algo='adam')
 
         self.num_const_steps = input_dict.get('num_const_steps', 1)
 
         self.num_points = num_points
         
-        self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        # self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
         
         
     def pepit_nesterov_check(self, params):
@@ -206,6 +212,15 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                    q=q,
                                 #    params=stochastic_params,
                                     params=1/self.smooth_param,
+                                   supervised=supervised,
+                                   z_star=z_star)
+                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+                angles = None
+            elif special_algo == 'adam':
+                
+                eval_out = self.adam_eval_fn(k=iters,
+                                   z0=z0,
+                                   q=q,
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]

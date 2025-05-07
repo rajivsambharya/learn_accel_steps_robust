@@ -15,12 +15,13 @@ from lah.pep import pepit_nesterov, pepit_accel_gd
 
 from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_starts, titles_2_markers, titles_2_styles
 
-# plt.rcParams.update({
-#     "text.usetex": True,
-#     "font.family": "serif",   # For talks, use sans-serif
-#     "font.size": 30,
-#     # "font.size": 16,
-# })
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",   # For talks, use sans-serif
+    "font.size": 34,
+    # "font.size": 30,
+    # "font.size": 16,
+})
 import os
 import re
 cmap = plt.cm.Set1

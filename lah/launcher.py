@@ -1135,6 +1135,9 @@ class Workspace:
 
                 # perturb slightly for training
                 self.l2ws_model.init_params()
+            elif self.l2ws_model.algo == 'lah_accel_logisticgd':
+                # adam
+                self.eval_iters_train_and_test('adam', None)
 
             # prev sol eval
             if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:

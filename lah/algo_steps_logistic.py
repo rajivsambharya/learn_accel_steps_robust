@@ -178,7 +178,6 @@ def fixed_point_logisticgd(z, X, y, gd_step):
     w, b = z[:-1], z[-1]
     logits = jnp.clip(X @ w + b, -20, 20)
     y_hat = sigmoid(logits)
-    # y_hat = sigmoid(X @ w + b)
     
     dw, db = compute_gradient(X, y, y_hat)
     w_next = w - gd_step * dw #(dw + .01 * w)
@@ -448,7 +447,6 @@ def fixed_point_nesterov_logisticgd(z, v, t, X, y, gd_step):
 
 def fixed_point_lah_nesterov_logisticgd(z, v, t, X, y, gd_step, beta):
     v_next = fixed_point_logisticgd(z, X, y, gd_step)
-    # t_next = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
     z_next = v_next + beta * (v_next - v)
     t_next = t + 1
     return z_next, v_next, t_next
@@ -537,3 +535,184 @@ def k_steps_train_lah_nesterov_gd(k, z0, q, params, num_points, supervised, z_st
         out = python_fori_loop(start_iter, k, fp_train_partial, val)
     z_final, y_final, t_final, iter_losses = out
     return z_final, y_final, t_final, iter_losses
+
+
+def k_steps_eval_adam_logistic(k, z0, q, num_points, step_size, beta1, beta2, epsilon, supervised, z_star, jit):
+    X_flat = q[:num_points * 784]
+    X = jnp.reshape(X_flat, (num_points, 784))
+    y_label = q[num_points * 784:]
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size))
+    z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
+    fp_eval_partial = partial(fp_eval_adam_logistic,
+                              supervised=supervised,
+                              z_star=z_star,
+                              X=X,
+                              y_label=y_label,
+                              step_size=step_size,
+                              beta1=beta1,
+                              beta2=beta2,
+                              epsilon=epsilon
+                              )
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    # y0 = z0
+    t0 = 1
+    m_w, v_w, m_b, v_b = jnp.zeros(784), jnp.zeros(784), jnp.zeros(1), jnp.zeros(1)
+    val = z0, t0, iter_losses, z_all, obj_diffs, m_w, v_w, m_b, v_b
+    
+    start_iter = 0
+    if jit:
+        out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
+    else:
+        out = python_fori_loop(start_iter, k, fp_eval_partial, val)
+    z_final, t_final, iter_losses, z_all, obj_diffs, m_w, v_w, m_b, v_b = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+    return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
+def fp_eval_adam_logistic(i, val, supervised, z_star, X, y_label, step_size, beta1, beta2, epsilon):
+    z, t, loss_vec, z_all, obj_diffs, m_w, v_w, m_b, v_b = val
+    # z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=100)) #beta_vals = np.clip(params[:,1], a_min=0, a_max=0.999)
+    z_next, m_w_next, v_w_next, m_b_next, v_b_next = fixed_point_logistic_adam(z, X, y_label, step_size, beta1, beta2, epsilon, m_w, v_w, m_b, v_b, t)
+    t_next = t + 1
+    
+    if supervised:
+        diff = jnp.linalg.norm(z - z_star)
+    else:
+        diff = jnp.linalg.norm(z_next - z)
+    
+    loss_vec = loss_vec.at[i].set(diff)
+    w, b = z[:-1], z[-1]
+
+    obj = compute_loss(y_label, sigmoid(X @ w + b))
+    w_star, b_star = z_star[:-1], z_star[-1]
+    opt_obj = compute_loss(y_label, sigmoid(X @ w_star + b_star))
+
+
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+    z_all = z_all.at[i, :].set(z_next)
+
+    return z_next, t_next, loss_vec, z_all, obj_diffs, m_w_next, v_w_next, m_b_next, v_b_next
+
+
+def fixed_point_logistic_adam(z, X, y, step_size, beta1, beta2, epsilon, m_w, v_w, m_b, v_b, t):
+    w, b = z[:-1], z[-1]
+    logits = jnp.clip(X @ w + b, -20, 20)
+    y_hat = sigmoid(logits)
+    
+    dw, db = compute_gradient(X, y, y_hat)
+    
+    # Update moments
+    m_w = beta1 * m_w + (1 - beta1) * dw
+    v_w = beta2 * v_w + (1 - beta2) * (dw ** 2)
+    
+    m_b = beta1 * m_b + (1 - beta1) * db
+    v_b = beta2 * v_b + (1 - beta2) * (db ** 2)
+    
+    # Bias correction
+    m_w_hat = m_w / (1 - beta1 ** t)
+    v_w_hat = v_w / (1 - beta2 ** t)
+    
+    m_b_hat = m_b / (1 - beta1 ** t)
+    v_b_hat = v_b / (1 - beta2 ** t)
+    
+    # Update weights and bias
+    w_next = w - step_size * m_w_hat / (jnp.sqrt(v_w_hat) + epsilon)
+    b_next = b - step_size * m_b_hat / (jnp.sqrt(v_b_hat) + epsilon)
+    
+    z_next = jnp.hstack([w_next, b_next])
+    return z_next, m_w, v_w, m_b, v_b
+
+
+
+def k_steps_eval_adagrad_logistic(k, z0, q, num_points, step_size, supervised, z_star, jit):
+    X_flat = q[:num_points * 784]
+    X = jnp.reshape(X_flat, (num_points, 784))
+    y_label = q[num_points * 784:]
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size))
+    z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
+    fp_eval_partial = partial(fp_eval_adagrad_logistic,
+                              supervised=supervised,
+                              z_star=z_star,
+                              X=X,
+                              y_label=y_label,
+                              step_size=step_size
+                              )
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    # y0 = z0
+    t0 = 1
+    G_diag = jnp.zeros(785)
+    val = z0, t0, iter_losses, z_all, obj_diffs, G_diag
+    
+    start_iter = 0
+    if jit:
+        out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
+    else:
+        out = python_fori_loop(start_iter, k, fp_eval_partial, val)
+    z_final, t_final, iter_losses, z_all, obj_diffs, G_diag = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+    return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
+def fp_eval_adagrad_logistic(i, val, supervised, z_star, X, y_label, step_size):
+    z, t, loss_vec, z_all, obj_diffs, G_diag = val
+    # z_next, y_next, t_next = fixed_point_lah_nesterov_logisticgd(z, y, t, X, y_label, gd_steps[i], jnp.clip(betas[i], a_min=0, a_max=100)) #beta_vals = np.clip(params[:,1], a_min=0, a_max=0.999)
+    z_next, G_diag_next = fixed_point_logistic_adagrad(z, X, y_label, step_size, G_diag)
+    t_next = t + 1
+    
+    if supervised:
+        diff = jnp.linalg.norm(z - z_star)
+    else:
+        diff = jnp.linalg.norm(z_next - z)
+    
+    loss_vec = loss_vec.at[i].set(diff)
+    w, b = z[:-1], z[-1]
+
+    obj = compute_loss(y_label, sigmoid(X @ w + b))
+    w_star, b_star = z_star[:-1], z_star[-1]
+    opt_obj = compute_loss(y_label, sigmoid(X @ w_star + b_star))
+
+
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+    z_all = z_all.at[i, :].set(z_next)
+
+    return z_next, t_next, loss_vec, z_all, obj_diffs, G_diag_next
+
+
+def fixed_point_logistic_adagrad(z, X, y, step_size, G_diag):
+    w, b = z[:-1], z[-1]
+    logits = jnp.clip(X @ w + b, -20, 20)
+    y_hat = sigmoid(logits)
+    
+    dw, db = compute_gradient(X, y, y_hat)
+    
+    G_w_diag = G_diag[:-1]
+    G_b_diag = G_diag[-1]
+    
+    G_w_diag_next = G_w_diag + dw * dw
+    G_b_diag_next = G_b_diag + db * db
+    G_diag_next = jnp.hstack([G_w_diag_next, G_b_diag_next])
+    
+    # Update moments
+    # m_w = beta1 * m_w + (1 - beta1) * dw
+    # v_w = beta2 * v_w + (1 - beta2) * (dw ** 2)
+    
+    # m_b = beta1 * m_b + (1 - beta1) * db
+    # v_b = beta2 * v_b + (1 - beta2) * (db ** 2)
+    
+    # # Bias correction
+    # m_w_hat = m_w / (1 - beta1 ** t)
+    # v_w_hat = v_w / (1 - beta2 ** t)
+    
+    # m_b_hat = m_b / (1 - beta1 ** t)
+    # v_b_hat = v_b / (1 - beta2 ** t)
+    
+    # Update weights and bias
+    w_next = w - step_size * dw * (G_w_diag_next + 1e-8) ** (-.5)
+    b_next = b - step_size * db * (G_b_diag_next + 1e-8) ** (-.5)
+    
+    z_next = jnp.hstack([w_next, b_next])
+    return z_next, G_diag_next

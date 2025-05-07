@@ -21,7 +21,7 @@ from jaxopt import Bisection
 
 import jax
 jax.config.update("jax_enable_x64", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 # jax.config.update("jax_debug_nans", True)
 
 
@@ -250,6 +250,8 @@ class L2Omodel(object):
             curr_loss_fn = self.loss_fn_eval_silver
         elif tag == 'conj_grad':
             curr_loss_fn = self.loss_fn_eval_conj_grad
+        elif tag == 'adam':
+            curr_loss_fn = self.loss_fn_eval_adam
         num_probs, _ = inputs.shape
         test_time0 = time.time()
         loss, out = curr_loss_fn(self.params, inputs, b, k, z_stars, key)
