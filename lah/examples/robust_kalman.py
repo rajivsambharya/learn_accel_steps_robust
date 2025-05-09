@@ -717,48 +717,51 @@ def run(run_cfg, lah=True):
             print(exc)
             setup_cfg = {}
     A, B, C = robust_kalman_setup(setup_cfg['gamma'], setup_cfg['dt'])
-    P = get_P(A, B, C, setup_cfg['T'], setup_cfg['mu'])
-    
-    n = P.shape[0]
-    l = -np.ones(n) * setup_cfg['w_max']
-    l[:4] = -np.inf
-    u = np.ones(n) * setup_cfg['w_max']
-    u[:4] = np.inf
-    static_dict = dict(P=jnp.array(P), ista_step=.01, l=jnp.array(l), u=jnp.array(u))
+    if False:
+        A, B, C = robust_kalman_setup(setup_cfg['gamma'], setup_cfg['dt'])
+        P = get_P(A, B, C, setup_cfg['T'], setup_cfg['mu'])
+        
+        
+        n = P.shape[0]
+        l = -np.ones(n) * setup_cfg['w_max']
+        l[:4] = -np.inf
+        u = np.ones(n) * setup_cfg['w_max']
+        u[:4] = np.inf
+        static_dict = dict(P=jnp.array(P), ista_step=.01, l=jnp.array(l), u=jnp.array(u))
 
-    # we directly save q now
-    static_flag = True
-    # if model == 'lah':
-    #     algo = 'lah_osqp'
-    # elif model == 'l2ws':
-    #     algo = 'osqp'
-    # elif model == 'lm':
-    #     algo = 'lm_osqp'
-    algo = 'lah_accel_box_qp'
-    
-    # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
-    # workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, custom_visualize_fn=vis_fn)
-    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
+        # we directly save q now
+        static_flag = True
+        # if model == 'lah':
+        #     algo = 'lah_osqp'
+        # elif model == 'l2ws':
+        #     algo = 'osqp'
+        # elif model == 'lm':
+        #     algo = 'lm_osqp'
+        algo = 'lah_accel_box_qp'
+        
+        # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
+        # workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, custom_visualize_fn=vis_fn)
+        workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
 
-    # run the workspace
-    workspace.run()
+        # run the workspace
+        workspace.run()
 
     # non-identity DR scaling
-    # rho_x = run_cfg.get('rho_x', 1)
-    # scale = run_cfg.get('scale', 1)
+    rho_x = run_cfg.get('rho_x', 1)
+    scale = run_cfg.get('scale', 1)
 
-    # static_dict = static_canon(
-    #     setup_cfg['T'],
-    #     setup_cfg['gamma'],
-    #     setup_cfg['dt'],
-    #     setup_cfg['mu'],
-    #     setup_cfg['rho'],
-    #     setup_cfg['B_const'],
-    #     rho_x=rho_x,
-    #     scale=scale
-    # )
+    static_dict = static_canon(
+        setup_cfg['T'],
+        setup_cfg['gamma'],
+        setup_cfg['dt'],
+        setup_cfg['mu'],
+        setup_cfg['rho'],
+        setup_cfg['B_const'],
+        rho_x=rho_x,
+        scale=scale
+    )
 
-    # get_q = None
+    get_q = None
 
     """
     static_flag = True
@@ -1436,7 +1439,7 @@ def static_canon(T, gamma, dt, mu, rho, B_const, rho_x=1, scale=1):
     assert z_start + T == single_len * T
 
     # get A, B, C
-    Ad, Bd, C = robust_kalman_setup(gamma, dt, B_const)
+    Ad, Bd, C = robust_kalman_setup(gamma, dt) #, B_const)
 
     # Quadratic objective
     P = np.zeros((single_len, single_len))

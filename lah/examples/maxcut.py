@@ -56,7 +56,8 @@ def run(run_cfg, lah=True):
     # we directly save q now
     get_q = None
     static_flag = True
-    algo = 'lah_scs' if lah else 'lm_scs'
+    # algo = 'lah_scs' if lah else 'lm_scs'
+    algo = 'lah_accel_scs' if lah else 'lm_scs'
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
 
     # run the workspace

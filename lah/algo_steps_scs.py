@@ -119,6 +119,7 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     all_u = all_u.at[i, :].set(u)
     all_v = all_v.at[i, :].set(v)
     return z_next, z, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
+    # return z_next, z_prev, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
 
 
 
@@ -192,6 +193,7 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
         diff = 0 #jnp.linalg.norm(z_next / z_next[-1] - z / z[-1])
     loss_vec = loss_vec.at[i].set(diff)
     return z_next, z, loss_vec
+    # return z_next, z_prev, loss_vec
 
 
 
@@ -621,6 +623,8 @@ def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, sca
     tau = jnp.clip(2 * tau_tilde - eta, a_min=0)
 
     # mu, eta update
+    # mu = 2 * w - w_temp #w_tilde
+    # mu = mu + 2 * (w - w_tilde)
     mu = mu + alpha * (w - w_tilde)
     eta = 1 #eta + alpha * (tau - tau_tilde)
 
@@ -629,8 +633,9 @@ def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, sca
     u = jnp.concatenate([w, jnp.array([tau])])
     u_tilde = jnp.concatenate([w_tilde, jnp.array([tau_tilde])])
     
-    beta = 0
-    z = z + beta * (z - z_prev)
+    # beta = 0
+    # z = z + beta * (z - z_prev)
+    z = (1 - beta) * z + beta * z_prev
 
     # for s extraction - not needed for algorithm
     full_scaled_vec = jnp.concatenate([scale_vec, jnp.array([tau_factor])])

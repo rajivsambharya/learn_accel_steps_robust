@@ -1053,7 +1053,7 @@ class Workspace:
         else:
             z_plot = z_all
 
-        plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
+        # plot_warm_starts(self.l2ws_model, self.plot_iterates, z_plot, train, col)
 
         if self.l2ws_model.algo[:3] == 'lah':
             n_iters = 64 if col == 'silver' else self.l2ws_model.step_varying_num + 1 #51

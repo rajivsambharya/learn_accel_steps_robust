@@ -2,22 +2,22 @@ nn_cfg:
   lr: 1e-1
   method: adam
   batch_size: 1000
-  epochs: 100
+  epochs: 1000
 
 data:
   datetime: ''
 
-eval_every_x_epochs: 100
+eval_every_x_epochs: 10
 save_every_x_epochs: 1
 test_every_x_epochs: 1
 write_csv_every_x_batches: 1
-epochs_jit: 10
+epochs_jit: 2
 
-num_const_steps: 2
+num_const_steps: 1
 
 N_train: 10
-N_test: 1000
-N_val: 1000
+N_test: 10
+N_val: 10
 num_samples_train: 10
 num_samples_test: 10
 eval_batch_size_test: 100
@@ -31,10 +31,12 @@ loss_method: 'fixed_k' #'fixed_k' #'constant_sum'
 
 accuracies: [.1, .01, .001, .0001]
 
-skip_startup: True
+skip_startup: False #True
 
-eval_unrolls: 500
+eval_unrolls: 100
 supervised: True
-train_unrolls: 10
+train_unrolls: 40
 algo: 'lah'
 
+pep_regularizer_coeff: 0
+pep_target: 0.005

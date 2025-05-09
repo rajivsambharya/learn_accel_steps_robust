@@ -83,6 +83,7 @@ def run(run_cfg, model='lah'):
         algo = 'ista'
     elif model == 'lm':
         algo = 'lm_ista'
+    # algo = 'lah_accel_scs' #if lah else 'lm_scs'
     deblur_or_denoise = setup_cfg['deblur_or_denoise']
     
     # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)

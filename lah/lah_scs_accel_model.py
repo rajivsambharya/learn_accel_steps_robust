@@ -82,10 +82,22 @@ class LAHAccelSCSmodel(L2Omodel):
     def init_params(self):
         self.mean_params = 0*jnp.ones((self.eval_unrolls, 6))
         # self.mean_params = self.mean_params.at[:, 2].set(jnp.log(1.0))
-        self.mean_params = self.mean_params.at[:, 4].set(-2.0)
+        # self.mean_params = self.mean_params.at[:, 4].set(-2.0)
+        
+        # do alpha
+        alpha = jnp.log(1) #jnp.log(.0001)
+        self.mean_params = self.mean_params.at[:, 2].set(alpha)
+        
+        # do beta
+        beta = .01 * jnp.ones(self.eval_unrolls)
+        # t = 1
+        # for i in range(0, self.eval_unrolls):
+        #     beta = beta.at[i].set(1/(i+2)) #(jnp.log(t))
+
+        # beta = beta.at[:, 1].set(jnp.log(t_params))
+        self.mean_params = self.mean_params.at[:, 4].set(jnp.log(beta))
         # self.mean_params = self.mean_params.at[-1, 4].set(0)
         self.params = [self.mean_params]
-
 
     # def setup_optimal_solutions(self, dict):
     def setup_optimal_solutions(self, 
@@ -137,15 +149,16 @@ class LAHAccelSCSmodel(L2Omodel):
             factors2 = jnp.zeros((n_iters, self.m + self.n), dtype=jnp.int32)
             scaled_vecs = jnp.zeros((n_iters, self.m + self.n))
 
-            rho_xs, rho_ys, rho_ys_zero = params[0][:, 0], params[0][:, 1], params[0][:, 4]
+            rho_xs, rho_ys, rho_ys_zero = params[0][:, 0], params[0][:, 1], params[0][:, 3]
             
-
+            
             for i in range(n_iters):
-                rho_x = jnp.exp(rho_xs[0])
-                # rho_x, rho_y = jnp.exp(rho_xs[i]), jnp.exp(rho_ys[i])
-                # rho_y_zero = jnp.exp(rho_ys_zero[i])
+                # rho_x = jnp.exp(rho_xs[0])
+                # rho_y = jnp.exp(rho_ys[0])
+                rho_x, rho_y = jnp.exp(rho_xs[0]), jnp.exp(rho_ys[0])
+                rho_y_zero = jnp.exp(rho_ys_zero[0])
                 
-                factor, scale_vec = get_scaled_vec_and_factor(self.M, rho_x, rho_x, 
+                factor, scale_vec = get_scaled_vec_and_factor(self.M, rho_x, rho_y, 
                                                               rho_x,
                                                               self.m, self.n, 
                                                               zero_cone_size=self.zero_cone_size, 
@@ -157,8 +170,12 @@ class LAHAccelSCSmodel(L2Omodel):
                 print('factor', scale_vec)
 
             params[0] = params[0].at[-1, 2].set(0)
+            # params[0] = params[0].at[:, 2].set(0)
+            params[0] = params[0].at[-1, 4].set(-10)
             all_factors = factors1, factors2
-            scs_params = (params[0][:n_iters, :], all_factors, scaled_vecs)
+            # scs_params = (params[0][:n_iters, :], all_factors, scaled_vecs)
+            scs_params = (params[0][:, :], all_factors, scaled_vecs)
+            
 
             if diff_required:
                 z_final, iter_losses = train_fn(k=iters,
