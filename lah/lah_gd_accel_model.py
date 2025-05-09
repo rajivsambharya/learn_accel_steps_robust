@@ -6,7 +6,7 @@ from jax import random
 import numpy as np
 
 from lah.algo_steps import k_steps_eval_lah_gd, k_steps_train_lah_gd, k_steps_eval_nesterov_gd, k_steps_eval_conj_grad
-from lah.algo_steps_gd import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd
+from lah.algo_steps_gd import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_adagrad, k_steps_eval_backtracking
 from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
@@ -53,6 +53,11 @@ class LAHAccelGDmodel(L2Omodel):
                                        jit=self.jit)
         self.conj_grad_eval_fn = partial(k_steps_eval_conj_grad, P=P,
                                        jit=self.jit)
+        # self.adam_eval_fn = partial(k_steps_eval_adagrad, P=P, step_size=0.01,
+        #                                jit=self.jit)
+        self.adam_eval_fn = partial(k_steps_eval_backtracking, P=P, eta0=10.0,
+                                       jit=self.jit)
+        
         self.out_axes_length = 5
         # import pdb
         # pdb.set_trace()
@@ -70,6 +75,8 @@ class LAHAccelGDmodel(L2Omodel):
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
                                                special_algo='silver')
+        self.loss_fn_eval_adam = e2e_loss_fn(bypass_nn=False, diff_required=False, 
+                                               special_algo='adam')
         
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_conj_grad = e2e_loss_fn(bypass_nn=False, diff_required=False, 
@@ -80,8 +87,8 @@ class LAHAccelGDmodel(L2Omodel):
         # self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
         # self.pep_layer = create_nesterov_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
         self.pep_layer = create_quad_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
-        import pdb
-        pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
 
         
     def pepit_nesterov_check(self, params):
@@ -192,6 +199,15 @@ class LAHAccelGDmodel(L2Omodel):
                                    z0=z0,
                                    q=q,
                                    params=stochastic_params,
+                                   supervised=supervised,
+                                   z_star=z_star)
+                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+                angles = None
+            elif special_algo == 'adam':
+                eval_out = self.adam_eval_fn(k=iters,
+                                   z0=z0,
+                                   q=q,
+                                #    params=stochastic_params,
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]

@@ -5,7 +5,7 @@ from jax import random, vmap
 
 import numpy as np
 
-from lah.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic
+from lah.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic, k_steps_eval_logistic_backtracking
 from lah.l2o_model import L2Omodel
 from PEPit.functions import SmoothStronglyConvexFunction
 import cvxpy as cp
@@ -50,8 +50,11 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                        jit=self.jit)
         # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=0.001, beta1=0.9, beta2=0.99, epsilon=1e-8,
         #                                jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
+        # self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
+        #                                jit=self.jit)
+        self.adam_eval_fn = partial(k_steps_eval_logistic_backtracking, num_points=num_points, eta0=1.0,
                                        jit=self.jit)
+        
 
         self.out_axes_length = 5
 

@@ -5,7 +5,7 @@ from jax import random
 
 import numpy as np
 
-from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista
+from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista, k_steps_eval_lasso_backtracking
 from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
@@ -64,7 +64,7 @@ class LAHISTAmodel(L2Omodel):
                                         jit=self.jit)
         self.k_steps_eval_fn = partial(k_steps_eval_lah_fista, lambd=lambd, A=A,
                                        jit=self.jit)
-        self.nesterov_eval_fn = partial(k_steps_eval_fista, lambd=lambd, A=A,
+        self.nesterov_eval_fn = partial(k_steps_eval_lasso_backtracking, lambd=lambd, eta0=1.0, A=A,
                                        jit=self.jit)
 
         self.out_axes_length = 5
@@ -570,7 +570,7 @@ class LAHISTAmodel(L2Omodel):
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
-                                   params=stochastic_params[:,0],
+                                #    params=stochastic_params[:,0],
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
@@ -580,7 +580,7 @@ class LAHISTAmodel(L2Omodel):
                 eval_out = self.nesterov_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
-                                   params=stochastic_params[:,0],
+                                #    params=stochastic_params[:,0],
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]

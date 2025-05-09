@@ -716,3 +716,92 @@ def fixed_point_logistic_adagrad(z, X, y, step_size, G_diag):
     
     z_next = jnp.hstack([w_next, b_next])
     return z_next, G_diag_next
+
+
+def sigmoid(x):
+    return 1 / (1 + jnp.exp(-x))
+
+def compute_loss(y, y_hat):
+    eps = 1e-8
+    return -jnp.mean(y * jnp.log(y_hat + eps) + (1 - y) * jnp.log(1 - y_hat + eps))
+
+def compute_gradient(X, y, y_hat):
+    error = y_hat - y
+    dw = X.T @ error / X.shape[0]
+    db = jnp.mean(error)
+    return dw, db
+
+def fixed_point_logistic_backtracking(z, X, y, eta_init, beta, alpha):
+    w, b = z[:-1], z[-1]
+    logits = jnp.clip(X @ w + b, -20, 20)
+    y_hat = sigmoid(logits)
+    loss = compute_loss(y, y_hat)
+    dw, db = compute_gradient(X, y, y_hat)
+    grad = jnp.hstack([dw, db])
+    eta = eta_init
+
+    def cond_fn(val):
+        eta, _ = val
+        z_new = z - eta * grad
+        w_new, b_new = z_new[:-1], z_new[-1]
+        logits_new = jnp.clip(X @ w_new + b_new, -20, 20)
+        y_hat_new = sigmoid(logits_new)
+        loss_new = compute_loss(y, y_hat_new)
+        rhs = loss - alpha * eta * jnp.dot(grad, grad)
+        return loss_new > rhs
+
+    def body_fn(val):
+        eta, _ = val
+        return eta * beta, None
+
+    eta_final, _ = lax.while_loop(cond_fn, body_fn, (eta, None))
+    z_next = z - eta_final * grad
+    return z_next, eta_final
+
+def fp_eval_logistic_backtracking(i, val, supervised, z_star, X, y_label, eta_init, beta, alpha):
+    z, t, loss_vec, z_all, obj_diffs, _ = val
+    z_next, eta_next = fixed_point_logistic_backtracking(z, X, y_label, eta_init, beta, alpha)
+    t_next = t + 1
+    diff = jnp.linalg.norm(z - z_star) if supervised else jnp.linalg.norm(z_next - z)
+    loss_vec = loss_vec.at[i].set(diff)
+    z_all = z_all.at[i, :].set(z_next)
+
+    w, b = z_next[:-1], z_next[-1]
+    obj = compute_loss(y_label, sigmoid(X @ w + b))
+    w_star, b_star = z_star[:-1], z_star[-1]
+    opt_obj = compute_loss(y_label, sigmoid(X @ w_star + b_star))
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+    return z_next, t_next, loss_vec, z_all, obj_diffs, eta_next
+
+def k_steps_eval_logistic_backtracking(k, z0, q, num_points, eta0, supervised, z_star, jit, beta=0.5, alpha=0.1):
+    X_flat = q[:num_points * 784]
+    X = jnp.reshape(X_flat, (num_points, 784))
+    y_label = q[num_points * 784:]
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size)).at[0, :].set(z0)
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    t0 = 1
+
+    val = z0, t0, iter_losses, z_all, obj_diffs, eta0
+
+    fp_eval_partial = partial(fp_eval_logistic_backtracking,
+                              supervised=supervised,
+                              z_star=z_star,
+                              X=X,
+                              y_label=y_label,
+                              eta_init=eta0,
+                              beta=beta,
+                              alpha=alpha)
+
+    if jit:
+        out = lax.fori_loop(0, k, fp_eval_partial, val)
+    else:
+        for i in range(k):
+            val = fp_eval_partial(i, val)
+        out = val
+
+    z_final, _, iter_losses, z_all, obj_diffs, _ = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+    return z_final, iter_losses, z_all_plus_1, obj_diffs

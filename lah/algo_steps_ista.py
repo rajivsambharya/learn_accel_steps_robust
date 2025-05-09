@@ -380,3 +380,93 @@ def fixed_point_fista_beta(z, y, beta, A, b, lambd, ista_step):
     t_next = beta
     y_next = z_next + beta * (z_next - z)
     return z_next, y_next, t_next
+
+# Soft thresholding (proximal operator for L1 norm)
+def soft_thresholding(x, thresh):
+    return jnp.sign(x) * jnp.maximum(jnp.abs(x) - thresh, 0.0)
+
+# Gradient of smooth term 0.5 ||Az - b||^2
+def grad_smooth(z, A, b):
+    return A.T @ (A @ z - b)
+
+# Objective: smooth + L1
+def full_obj(z, A, b, lam):
+    return 0.5 * jnp.sum((A @ z - b)**2) + lam * jnp.sum(jnp.abs(z))
+
+# Proximal gradient step with backtracking
+def fixed_point_prox_gd_backtracking(z, A, b, lam, eta_init, beta, alpha):
+    grad = grad_smooth(z, A, b)
+    eta = eta_init
+
+    # def cond_fn(val):
+    #     eta, _ = val
+    #     z_new = soft_thresholding(z - eta * grad, eta * lam)
+    #     lhs = 0.5 * jnp.sum((A @ z_new - b)**2)
+    #     rhs = 0.5 * jnp.sum((A @ z - b)**2) - alpha * eta * jnp.dot(grad, grad)
+    #     # lhs = full_obj(z_new, A, b, lam)
+    #     # rhs = full_obj(z, A, b, lam) - alpha * eta * jnp.dot(grad, grad)
+    #     return lhs > rhs
+    def cond_fn(val):
+        eta, _ = val
+        z_new = soft_thresholding(z - eta * grad, eta * lam)
+        f_new = 0.5 * jnp.sum((A @ z_new - b)**2)
+        f_old = 0.5 * jnp.sum((A @ z - b)**2)
+        inner_prod = jnp.dot(grad, z_new - z)
+        quad_term = (1 / (2 * eta)) * jnp.sum((z_new - z) ** 2)
+
+        return f_new > f_old + inner_prod + quad_term
+
+    def body_fn(val):
+        eta, _ = val
+        return eta * beta, None
+
+    eta_final, _ = lax.while_loop(cond_fn, body_fn, (eta, None))
+    z_next = soft_thresholding(z - eta_final * grad, eta_final * lam)
+    return z_next, eta_final
+
+# Single iteration body
+def fp_eval_lasso(i, val, supervised, z_star, A, b, lambd, beta, alpha):
+    z, t, loss_vec, z_all, obj_diffs, eta_init = val
+    z_next, eta_next = fixed_point_prox_gd_backtracking(z, A, b, lambd, eta_init, beta, alpha)
+    t_next = t + 1
+
+    diff = jnp.linalg.norm(z - z_star) if supervised else jnp.linalg.norm(z_next - z)
+    loss_vec = loss_vec.at[i].set(diff)
+    z_all = z_all.at[i, :].set(z_next)
+
+    obj = full_obj(z_next, A, b, lambd)
+    opt_obj = full_obj(z_star, A, b, lambd)
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+    return z_next, t_next, loss_vec, z_all, obj_diffs, eta_next
+
+# Top-level evaluation loop
+def k_steps_eval_lasso_backtracking(k, z0, A, q, lambd, eta0, supervised, z_star, jit, beta=0.9, alpha=0.1):
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size)).at[0, :].set(z0)
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    t0 = 0
+
+    val = z0, t0, iter_losses, z_all, obj_diffs, eta0
+
+    fp_eval_partial = partial(fp_eval_lasso,
+                              supervised=supervised,
+                              z_star=z_star,
+                              A=A,
+                              b=q,
+                              lambd=lambd,
+                              beta=beta,
+                              alpha=alpha)
+
+    if jit:
+        out = lax.fori_loop(0, k, fp_eval_partial, val)
+    else:
+        for i in range(k):
+            val = fp_eval_partial(i, val)
+        out = val
+
+    z_final, _, iter_losses, z_all, obj_diffs, _ = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+
+    return z_final, iter_losses, z_all_plus_1, obj_diffs
