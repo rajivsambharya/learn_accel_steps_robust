@@ -72,7 +72,7 @@ class LAHSCSmodel(L2Omodel):
                                        idx_mapping=self.idx_mapping,
                                        zero_cone_size=self.zero_cone_size,
                                        jit=self.jit,
-                                       hsde=True,
+                                       hsde=False,
                                        custom_loss=custom_loss,
                                        lightweight=lightweight)
         

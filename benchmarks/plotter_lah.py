@@ -18,7 +18,7 @@ from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_st
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",   # For talks, use sans-serif
-    "font.size": 34,
+    "font.size": 30,
     # "font.size": 30,
     # "font.size": 16,
 })
@@ -707,9 +707,9 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
 
         # plot the values
         axes[0].plot(results_dict[method]['pr'][:num_iters], linestyle=style, marker=marker, color=color, 
-                                markevery=(mark_start, markevery))
+                                markevery=(0, 3))
         axes[1].plot(results_dict[method]['dr'][:num_iters], linestyle=style, marker=marker, color=color, 
-                                markevery=(mark_start, markevery))
+                                markevery=(0, 3))
         
         # plot the gains
         # axes[1, 0].plot(gains_dict[method]['pr'][:num_iters], linestyle=style, marker=marker, color=color, 
@@ -761,7 +761,10 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
 
 
 def populate_acc_reductions_dict(accs_dict):
-    cold_start_dict = accs_dict['nesterov']
+    if 'nesterov' in accs_dict.keys():
+        cold_start_dict = accs_dict['nesterov']
+    else:
+        cold_start_dict = accs_dict['cold_start']
     acc_reductions_dict = {}
     methods = list(accs_dict.keys())
     for i in range(len(methods)):
@@ -814,11 +817,29 @@ def populate_gains_dict(results_dict, num_iters, constrained=True):
     return gains_dict
 
 
+# def populate_results_dict(example, cfg, constrained=True):
+#     results_dict = {}
+#     for method in cfg.methods:
+#         curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained)
+#         results_dict[method] = curr_method_dict
+
+#     return results_dict
 def populate_results_dict(example, cfg, constrained=True):
     results_dict = {}
     for method in cfg.methods:
+        # if method[:2] != 'LB' and method[:2] != 'UB':
         curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained)
         results_dict[method] = curr_method_dict
+
+        # curr_method_dict is a dict of 
+        #   {'pr': pr_residuals, 'dr': dr_residuals, 'dist_opt': dist_opts, 'pr_dr_max': pr_dr_maxes}
+        # important: nothing to do with reductions or gains here
+
+        # handle the upper and lower bounds for lah
+        # else:
+        #     curr_method_dict = populate_curr_method_bound_dict(method, example, cfg, constrained)
+        #     results_dict[method] = curr_method_dict
+        
 
     return results_dict
 
@@ -892,6 +913,17 @@ def get_accs():
 
     
 
+# def populate_curr_method_dict(method, example, cfg, constrained):
+#     # get the datetime
+#     dt = cfg['methods'][method]
+
+#     # get the column
+#     col = method2col(method)
+
+#     obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
+#     curr_method_dict = {'obj_diff': obj_diffs}
+
+#     return curr_method_dict
 def populate_curr_method_dict(method, example, cfg, constrained):
     # get the datetime
     dt = cfg['methods'][method]
@@ -899,8 +931,24 @@ def populate_curr_method_dict(method, example, cfg, constrained):
     # get the column
     col = method2col(method)
 
-    obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
-    curr_method_dict = {'obj_diff': obj_diffs}
+    if constrained:
+        primal_residuals = recover_data(example, dt, 'primal_residuals_test.csv', col)
+        dual_residuals = recover_data(example, dt, 'dual_residuals_test.csv', col)
+        pr_dr_maxes = recover_data(example, dt, 'pr_dr_max_test.csv', col)
+        # dist_opts = recover_data(example, dt, 'dist_opts_df_test.csv', col)
+
+        # populate with pr, dr, pr_dr_max, dist_opt
+        curr_method_dict = {'pr': np.clip(primal_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
+                            'dr': np.clip(dual_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
+                            'pr_dr_max': pr_dr_maxes} #,
+                            # 'dist_opts': dist_opts}
+    else:
+        obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
+        # if example == 'ridge_regression' and method[:3] == 'lah':
+        #     step_sizes_dict = get_lah_gd_step_size(example, cfg)
+        #     lah_step_sizes = step_sizes_dict[method].to_numpy()[:, 1]
+        #     obj_diffs = ridge_get_subopts(example, cfg, lah_step_sizes)
+        curr_method_dict = {'obj_diff': obj_diffs}
 
     return curr_method_dict
 

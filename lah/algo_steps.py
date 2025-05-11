@@ -173,7 +173,7 @@ def k_steps_eval_lah_scs(k, z0, q, params, proj, P, A, idx_mapping, supervised, 
     fp_eval_partial = partial(fp_eval_lah_scs, q_r=q, z_star=z_star, all_factors=all_factors,
                               proj=proj, P=P, A=A, idx_mapping=idx_mapping,
                               c=None, b=None, hsde=hsde,
-                              homogeneous=True, scaled_vecs=scaled_vecs, alphas=alphas, tau_factors=tau_factors,
+                              homogeneous=False, scaled_vecs=scaled_vecs, alphas=alphas, tau_factors=tau_factors,
                               custom_loss=custom_loss,
                               verbose=verbose)
     val = z0, z0, iter_losses, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts

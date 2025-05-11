@@ -109,7 +109,9 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     # primal and dual residuals
     if not lightweight:
         # x, y, s = extract_sol(u, v, n, hsde)
-        x, y, s = extract_sol(all_u[i-1,:], all_v[i-1,:], n, hsde)
+        # x, y, s = extract_sol(all_u[i-1,:], all_v[i-1,:], n, hsde)
+        # x, y, s = extract_sol(all_u[i,:], all_v[i,:], n, hsde)
+        x, y, s = extract_sol(u, v, n, hsde)
         pr = jnp.linalg.norm(A @ x + s - q_r[n:])
         dr = jnp.linalg.norm(A.T @ y + P @ x + q_r[:n])
         primal_residuals = primal_residuals.at[i].set(pr)
