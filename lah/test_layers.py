@@ -100,3 +100,15 @@ def test_strcvx_smooth_quadprox_pep_layer_matches_pepit(proxgd_setup):
 
     # np.testing.assert_allclose(our_tau, pepit_tau, rtol = 1e-2, atol = 1e-4)
     np.testing.assert_allclose(our_tau, pepit_tau, atol = 1e-4)
+    
+def test_fixed_point():
+    num_iters = 40
+    alpha = .75 * np.ones(num_iters)
+    alpha[2:20] = 1.5
+    alpha[-1] = .5 
+    beta =  .1 * np.ones(num_iters)
+    beta[-1] = 0
+    params = np.column_stack((alpha, beta))
+    out = pepit_fixed_point(params)
+    import pdb
+    pdb.set_trace()

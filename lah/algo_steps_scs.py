@@ -81,13 +81,13 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     homogeneous tells us if we set tau = 1.0 or use the root_plus method
     """
     m, n = A.shape
-    z, z_prev, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts = val
+    z, y_prev, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts = val
 
     r = q_r
     factors1, factors2 = all_factors
     idx = idx_mapping[i]
-    z_next, u, u_tilde, v = fixed_point_hsde(
-        z, z_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx],
+    z_next, y_curr, u, u_tilde, v = fixed_point_hsde(
+        z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx],
         verbose=verbose)
     # z0 = 0 * z_peaceman
     # z0 = z0.at[-1].set(1)
@@ -120,7 +120,7 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     all_z = all_z.at[i, :].set(z_next)
     all_u = all_u.at[i, :].set(u)
     all_v = all_v.at[i, :].set(v)
-    return z_next, z, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
+    return z_next, y_curr, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
     # return z_next, z_prev, loss_vec, all_z, all_u, all_v, primal_residuals, dual_residuals, dist_opts
 
 
@@ -168,7 +168,7 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     q_r = r if hsde else q_r = q
     homogeneous tells us if we set tau = 1.0 or use the root_plus method
     """
-    z, z_prev, loss_vec = val
+    z, y_prev, loss_vec = val
     r = q_r
     factors1, factors2 = all_factors
     idx = idx_mapping[i]
@@ -177,8 +177,8 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     #                                          factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx])
     # z_next = alphas[idx] * z_prev + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
     
-    z_next, u, u_tilde, v = fixed_point_hsde(
-        z, z_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx])
+    z_next, y, u, u_tilde, v = fixed_point_hsde(
+        z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx])
     
     # add acceleration
     # z_next = (1 - betas[i, 0]) * z_next + betas[i, 0] * z
@@ -194,7 +194,7 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     else:
         diff = 0 #jnp.linalg.norm(z_next / z_next[-1] - z / z[-1])
     loss_vec = loss_vec.at[i].set(diff)
-    return z_next, z, loss_vec
+    return z_next, y, loss_vec
     # return z_next, z_prev, loss_vec
 
 
@@ -564,7 +564,7 @@ soc_proj_single_batch = vmap(soc_proj_single, in_axes=(0), out_axes=(0))
 sdp_proj_batch = vmap(sdp_proj_single, in_axes=(0, None), out_axes=(0))
 
 
-def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, scale_vec, alpha, beta, lah=True, verbose=False):
+def fixed_point_hsde(z_init, y_prev, homogeneous, r, factor1, factor2, proj, scale_vec, alpha, beta, lah=True, verbose=False):
     """
     implements 1 iteration of algorithm 5.1 in https://arxiv.org/pdf/2004.02177.pdf
 
@@ -631,13 +631,13 @@ def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, sca
     eta = 1 #eta + alpha * (tau - tau_tilde)
 
     # concatenate for z, u
-    z = jnp.concatenate([mu, jnp.array([eta])])
+    y = jnp.concatenate([mu, jnp.array([eta])])
     u = jnp.concatenate([w, jnp.array([tau])])
     u_tilde = jnp.concatenate([w_tilde, jnp.array([tau_tilde])])
     
     # beta = 0
     # z = z + beta * (z - z_prev)
-    z = (1 - beta) * z + beta * z_prev
+    z = (1 - beta) * y + beta * y_prev
 
     # for s extraction - not needed for algorithm
     full_scaled_vec = jnp.concatenate([scale_vec, jnp.array([tau_factor])])
@@ -652,4 +652,4 @@ def fixed_point_hsde(z_init, z_prev, homogeneous, r, factor1, factor2, proj, sca
         print('z', z)
     # import pdb
     # pdb.set_trace()
-    return z, u, u_tilde, v
+    return z, y, u, u_tilde, v

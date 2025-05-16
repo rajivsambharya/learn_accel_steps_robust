@@ -91,10 +91,10 @@ class LAHISTAmodel(L2Omodel):
     #     opt_vals = batch_f(self.z_stars_train, self.theta)
 
     def transform_params(self, params, n_iters):
-        transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
-        transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:, :]))
-        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
-        return transformed_params
+        # transformed_params = jnp.zeros((n_iters, params[0].shape[1]))
+        # transformed_params = transformed_params.at[:, :].set(jnp.exp(params[0][:, :]))
+        return jnp.exp(params[0][:, :])
+        # return transformed_params
 
     def perturb_params(self):
         # init step-varying params
@@ -162,27 +162,22 @@ class LAHISTAmodel(L2Omodel):
         return penalty
 
     def init_params(self):
-        # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.step_varying_num)
+        # k = self.step_varying_num
+        k = self.eval_unrolls
         
         # init step-varying params
-        # step_varying_params = jnp.log(1 / self.smooth_param) * jnp.ones((self.step_varying_num, 1))
-        step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((self.step_varying_num, 2))
-        # step_varying_params = step_varying_params.at[0,0].set(jnp.log(1.1 / self.smooth_param))
-        # step_varying_params = step_varying_params.at[1,0].set(jnp.log(1.5 / self.smooth_param))
+        step_varying_params = jnp.log(1. / self.smooth_param) * jnp.ones((k, 2))
 
-        t_params = jnp.ones(self.step_varying_num)
+        t_params = jnp.ones(k)
         t = 1
-        for i in range(1, self.step_varying_num):
+        for i in range(1, k):
             t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
             t_params = t_params.at[i].set(t) #(jnp.log(t))
         beta_params = convert_t_to_beta(t_params)
         step_varying_params = step_varying_params.at[:, 1].set(jnp.log(beta_params))
-        # step_varying_params = step_varying_params.at[1:, 1].set(jnp.log(beta_params.mean()))
-        # step_varying_params = step_varying_params.at[:, 1].set(jnp.log(t_params))
 
         # init steady_state_params
         steady_state_params = 0 * jnp.ones((1, 2))
-        # steady_state_params = 0 * jnp.ones((1, 2)) #sigmoid_inv(1 / (self.smooth_param)) * jnp.ones((1, 1))
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         

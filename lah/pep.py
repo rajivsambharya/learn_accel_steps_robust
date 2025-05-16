@@ -8,13 +8,68 @@ from jax import grad, lax, vmap
 from jax.tree_util import tree_map
 from PEPit import PEP
 from PEPit.functions import SmoothStronglyConvexFunction, SmoothConvexFunction, ConvexFunction
-from PEPit.operators import SymmetricLinearOperator
+from PEPit.operators import SymmetricLinearOperator, LipschitzOperator
 from PEPit.primitive_steps import proximal_step
 from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 from cvxpylayers.jax import CvxpyLayer
 import dill
 import os
 import hydra
+
+
+def pepit_fixed_point(params):
+    num_iters = params[:,0].size
+    relaxation_sizes = params[:,0]
+    averaged_sizes = relaxation_sizes / 2
+    beta_vals = params[:,1]
+    
+    # Instantiate PEP
+    problem = PEP()
+
+    # Declare a non expansive operator
+    A = problem.declare_function(LipschitzOperator, L=1.)
+
+    # Start by defining its unique optimal point xs = x_*
+    xs, _, _ = A.fixed_point()
+
+    # Then define the starting point x0 of the algorithm
+    x0 = problem.set_initial_point()
+
+    # Set the initial constraint that is the difference between x0 and xs
+    problem.set_initial_condition((x0 - xs) ** 2 <= 1)
+    
+    # Compute n steps of the accelerated proximal gradient method starting from x0
+    x_new = x0
+    y = x0
+    for i in range(num_iters):
+        alpha = averaged_sizes[i]
+        beta = beta_vals[i]
+        x_old = x_new
+        x_new = (1 - alpha) * y + alpha * A.gradient(y)
+        y = x_new + beta * (x_new - x_old)
+
+    # Set the performance metric to the function value accuracy
+    problem.set_performance_metric((y - A.gradient(y)) ** 2)
+    
+    # Solve the PEP
+    verbose = 1
+    pepit_verbose = max(verbose, 0)
+    try:
+        pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+    except Exception as e:
+        print('exception', e)
+        pepit_tau = 0
+    
+    # Print conclusion if required
+    verbose = 0
+    if verbose:
+        print('*** Example file:'
+            ' worst-case performance of the Accelerated Proximal Gradient Method in function values***')
+        print('\tPEPit guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(pepit_tau))
+        # print('\tTheoretical guarantee:\t f(x_n)-f_* <= {:.6} ||x0 - xs||^2'.format(theoretical_tau))
+
+    # Return the worst-case guarantee of the evaluated method (and the reference theoretical value)
+    return pepit_tau
 
 
 def pepit_nesterov(mu, L, params):

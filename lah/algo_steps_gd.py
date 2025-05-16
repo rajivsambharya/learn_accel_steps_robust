@@ -39,8 +39,10 @@ def fp_eval_lah_nesterov_str_cvx_gd(i, val, supervised, z_star, P, c, gd_steps, 
 def fp_train_lah_nesterov_str_cvx_gd(i, val, supervised, z_star, P, c, gd_steps, betas):
     z, y, t, loss_vec = val
     z_next, y_next, t_next = fixed_point_nesterov_str_cvx(z, y, t, P, c, gd_steps[i], betas[i])
-    diff = jnp.linalg.norm(z_next - z_star)
-    loss_vec = loss_vec.at[i].set(diff)
+    # diff = jnp.linalg.norm(z_next - z_star)
+    obj = .5 * z_next @ P @ z_next + c @ z_next
+    opt_obj = .5 * z_star @ P @ z_star + c @ z_star
+    loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 
