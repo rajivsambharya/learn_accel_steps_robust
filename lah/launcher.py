@@ -1074,6 +1074,8 @@ class Workspace:
         z_no_learn = self.z_no_learn_train if train else self.z_no_learn_test
         z_nn = z_no_learn
         z_prev_sol = z_no_learn
+        # import pdb
+        # pdb.set_trace()
         if self.has_custom_visualization:
             if self.vis_num > 0:
                 # custom_visualize(z_plot, train, col)
@@ -1142,8 +1144,8 @@ class Workspace:
             # pdb.set_trace()
 
             # prev sol eval
-            if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
-                self.eval_iters_train_and_test('prev_sol', None)
+            # if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
+            #     self.eval_iters_train_and_test('prev_sol', None)
 
         # load the weights AFTER the cold-start
         if self.load_weights_datetime is not None:

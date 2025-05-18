@@ -136,24 +136,22 @@ def shifted_sol(z_star, T, m, n):
     return shifted_z_star
 
 
-def single_rollout_theta(rollout_length, T, gamma, dt, w_max, y_max):
+def single_rollout_theta(rollout_length, T, sigma, p, gamma, dt, w_noise_var, y_noise_var, B_const=1):
     N = rollout_length
-    w_traj = np.random.uniform(low=-w_max, high=w_max, size=(2, T + rollout_length))
-    v = np.random.uniform(low=-y_max, high=y_max, size=(rollout_length, 2, T))
-    # w_traj = np.random.rand(2, T + rollout_length)
+    w_traj = w_noise_var * np.random.randn(2, T + rollout_length)
     # w = w_noise_var * np.random.randn(rollout_length, 2, T)
-    # v = np.random.rand(rollout_length, 2, T)
+    v = y_noise_var * np.random.randn(rollout_length, 2, T)
 
-    # for j in range(N):
-    #     inds = np.random.rand(T) <= p
-    #     outlier_v = sigma * np.random.randn(2, T)[:, inds]
-    #     # weird indexing to avoid transpose
-    #     v[j:j+1, :, inds] = outlier_v
+    for j in range(N):
+        inds = np.random.rand(T) <= p
+        outlier_v = sigma * np.random.randn(2, T)[:, inds]
+        # weird indexing to avoid transpose
+        v[j:j+1, :, inds] = outlier_v
 
     # simulate_fwd_batch = vmap(simulate_x_fwd, in_axes=(0, 0, None, None, None, None), out_axes=(0, 0))
 
     # get the true X's to have shape (4, T + rollout_length)
-    x_traj = simulate_x_fwd(w_traj, rollout_length + T, gamma, dt)
+    x_traj = simulate_x_fwd(w_traj, rollout_length + T, gamma, dt, B_const)
 
     # this translates to rollout_length problems
     # now get y_mat
@@ -209,8 +207,10 @@ def sample_theta(num_rollouts, rollout_length, T, sigma, p, gamma, dt, w_noise_v
     N = num_rollouts * rollout_length
 
     # generate random input and noise vectors
-    # w = w_noise_var * np.random.randn(num_rollouts, 2, T)
-    w = 2*np.random.rand(num_rollouts, 2, T) - 1
+    # w = w_noise_var * np.random.randn(N, 2, T)
+    # v = y_noise_var * np.random.randn(N, 2, T)
+    w_inits = w_noise_var * np.random.randn(num_rollouts, 2, T)
+    w = w_inits
     v = y_noise_var * np.random.randn(N, 2, T)
 
     for j in range(N):
@@ -277,6 +277,94 @@ def find_rotation_angle(y_T):
     # return angle
     return jnp.arctan2(y_T[1], y_T[0])
 
+
+def test_kalman():
+    nx, no, nu = 4, 2, 2
+    single_length = nx + no + nu + 3
+
+    T = 30
+    nvars = single_length * T
+    gamma = 0.05
+    dt = 0.5  # 0.05
+    p = .2
+    sigma = 20
+    mu = 1
+    rho = 1
+    # y, x_true, w_true, v = simulate(T, gamma, dt, sigma, p)
+
+    # sample to get (w, v) -- returns flat theta vector theta = (flat(w), flat(v))
+    # theta_np = sample_theta(T, sigma, p)
+    theta_np, x_trues, w_trues = sample_theta(T, sigma, p, gamma, dt)
+    theta = jnp.array(theta_np)
+
+    # get (x_true, w_true)
+    x_true, w_true = get_x_w_true(theta, T, gamma, dt)
+
+    # get y
+    q = single_q(theta, mu, rho, T, gamma, dt)
+
+    # update to input y
+    c_np, b_np = np.array(q[:nvars]), np.array(q[nvars:])
+    y = b_np[(T-1)*nx:T*(nx+no)-nx]
+    # yy= y.copy()
+    y_mat = np.reshape(y, (T, no))
+    y_mat = y_mat.T
+
+    # with huber
+    x1, w1, v1 = cvxpy_huber(T, y_mat, gamma, dt, mu, rho)
+
+    # plotting
+    time_limit = dt * T
+    ts, delt = np.linspace(0, time_limit, T, endpoint=True, retstep=True)
+    # plot_state(ts,(x_true, w_true),(x1, w1))
+    # plot_positions([x_true, y_mat], ['True', 'Noisy'])
+    # plot_positions([x_true, x1], ['True', 'KF recovery'])
+
+    # replace huber with socp, but cvxpy
+    # x2, w2, v2 = cvxpy_manual(T, y_mat, gamma, dt, mu, rho)
+
+    """
+    scs with our canon
+    """
+    # canon
+    out = static_canon(T, gamma, dt, mu, rho)
+    cones_dict = out["cones_dict"]
+
+    # solve with scs
+    tol = 1e-8
+    data = dict(P=out["P_sparse"], A=out["A_sparse"], c=c_np, b=b_np)
+
+    solver = scs.SCS(data, cones_dict, eps_abs=tol, eps_rel=tol)
+    sol = solver.solve()
+    x = sol["x"]
+    print('x', x)
+
+    # x3 = x[: T * nx]
+    # w3 = x[T * nx: T * (nx + nu)]
+    # s3 = x[T * (nx + nu): T * (nx + nu + 1)]
+    # v3 = x[T * (nx + nu + 1):-2*T]
+    # u3 = x[-T*2:-T]
+    # z3 = x[-T:]
+
+    # (x_t, w_t, s_t, v_t,  u_t, z_t)
+
+    # check with our scs
+    P_jax = jnp.array(out["P_sparse"].todense())
+    A_jax = jnp.array(out["A_sparse"].todense())
+    c_jax = jnp.array(c_np)
+    b_jax = jnp.array(b_np)
+
+    cones_jax = out["cones_dict"]
+    data = dict(P=P_jax, A=A_jax, c=c_jax, b=b_jax, cones=cones_jax)
+    # data['x'], data['y'] = sol['x'], sol['y']
+
+    xp, yd, sp = scs_jax(data, iters=1000)
+    # x4 = xp[: T * nx]
+    # w4 = xp[T * nx: T * (nx + nu)]
+    # s4 = xp[T * (nx + nu): T * (nx + nu + 1)]
+    # v4 = xp[T * (nx + nu + 1):-2*T]
+    # u4 = xp[-T*2:-T]
+    # z4 = xp[-T:]
 
 
 def plot_state(t, actual, estimated=None, filename=None):
@@ -545,11 +633,71 @@ def adjust_xy_min_max(x_min, x_max, y_min, y_max):
     return x_min_new, x_max_new, y_min_new, y_max_new
 
 
+def cvxpy_huber(T, y, gamma, dt, mu, rho):
+    x = cp.Variable(shape=(4, T + 1))
+    w = cp.Variable(shape=(2, T))
+    v = cp.Variable(shape=(2, T))
+    A, B, C = robust_kalman_setup(gamma, dt)
+
+    obj = cp.sum_squares(w)
+    obj += cp.sum([mu * cp.huber(cp.norm(v[:, t]), rho) for t in range(T)])
+    obj = cp.Minimize(obj)
+
+    constr = []
+    for t in range(T):
+        constr += [
+            x[:, t + 1] == A @ x[:, t] + B @ w[:, t],
+            y[:, t] == C @ x[:, t] + v[:, t],
+        ]
+
+    prob = cp.Problem(obj, constr)
+    prob.solve(verbose=True)
+
+    x = np.array(x.value)
+    w = np.array(w.value)
+    v = np.array(v.value)
+
+    return x, w, v
+
+
+def cvxpy_manual(T, y, gamma, dt, mu, rho):
+    x = cp.Variable(shape=(4, T + 1))
+    w = cp.Variable(shape=(2, T))
+    v = cp.Variable(shape=(2, T))
+    s = cp.Variable(shape=(T))
+    u = cp.Variable(shape=(T))
+    z = cp.Variable(shape=(T))
+    A, B, C = robust_kalman_setup(gamma, dt)
+
+    obj = cp.sum_squares(w)
+    obj += cp.sum([mu * (2 * u[t] + rho * z[t] ** 2) for t in range(T)])
+    # obj += cp.sum([tau * cp.huber(cp.norm(v[:, t]), rho) for t in range(T)])
+    obj = cp.Minimize(obj)
+
+    constr = []
+    for t in range(T):
+        constr += [
+            x[:, t + 1] == A @ x[:, t] + B @ w[:, t],
+            y[:, t] == C @ x[:, t] + v[:, t],
+            z <= rho,
+            u >= 0,
+            u + z == s,
+            cp.norm(v[:, t]) <= s[t],
+        ]
+
+    cp.Problem(obj, constr).solve(verbose=True)
+
+    x = np.array(x.value)
+    w = np.array(w.value)
+    v = np.array(v.value)
+    return x, w, v
+
+
 partial(jit, static_argnums=(2, 3, 4))
 
 
-def simulate_fwd(w_mat, v_mat, T, gamma, dt):
-    A, B, C = robust_kalman_setup(gamma, dt)
+def simulate_fwd(w_mat, v_mat, T, gamma, dt, B_const):
+    A, B, C = robust_kalman_setup(gamma, dt, B_const)
 
     x = jnp.zeros((4, T + 1))
     y_mat = jnp.zeros((2, T))
@@ -562,8 +710,8 @@ def simulate_fwd(w_mat, v_mat, T, gamma, dt):
     return y_mat, x
 
 
-def simulate_x_fwd(w_mat, T, gamma, dt):
-    A, B, C = robust_kalman_setup(gamma, dt)
+def simulate_x_fwd(w_mat, T, gamma, dt, B_const):
+    A, B, C = robust_kalman_setup(gamma, dt, B_const)
 
     x_mat = jnp.zeros((4, T + 1))
 
@@ -716,35 +864,6 @@ def run(run_cfg, lah=True):
         except yaml.YAMLError as exc:
             print(exc)
             setup_cfg = {}
-    A, B, C = robust_kalman_setup(setup_cfg['gamma'], setup_cfg['dt'])
-    if False:
-        A, B, C = robust_kalman_setup(setup_cfg['gamma'], setup_cfg['dt'])
-        P = get_P(A, B, C, setup_cfg['T'], setup_cfg['mu'])
-        
-        
-        n = P.shape[0]
-        l = -np.ones(n) * setup_cfg['w_max']
-        l[:4] = -np.inf
-        u = np.ones(n) * setup_cfg['w_max']
-        u[:4] = np.inf
-        static_dict = dict(P=jnp.array(P), ista_step=.01, l=jnp.array(l), u=jnp.array(u))
-
-        # we directly save q now
-        static_flag = True
-        # if model == 'lah':
-        #     algo = 'lah_osqp'
-        # elif model == 'l2ws':
-        #     algo = 'osqp'
-        # elif model == 'lm':
-        #     algo = 'lm_osqp'
-        algo = 'lah_accel_box_qp'
-        
-        # vis_fn = partial(custom_visualize_fn, figsize=img_size**2, deblur_or_denoise=deblur_or_denoise)
-        # workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, custom_visualize_fn=vis_fn)
-        workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
-
-        # run the workspace
-        workspace.run()
 
     # non-identity DR scaling
     rho_x = run_cfg.get('rho_x', 1)
@@ -772,16 +891,17 @@ def run(run_cfg, lah=True):
 
     custom_visualize_fn_partial = partial(custom_visualize_fn, T=setup_cfg['T'])
     algo = 'lah_accel_scs' if lah else 'lm_scs'
-    # algo = 'lah_scs'
 
-    # A = static_dict['A_sparse']
+    A = static_dict['A_sparse']
     m, n = A.shape
     partial_shifted_sol_fn = partial(shifted_sol, T=setup_cfg['T'],  m=m, n=n)
     batch_shifted_sol_fn = vmap(partial_shifted_sol_fn, in_axes=(0), out_axes=(0))
 
+    custom_loss = partial(rkf_loss, T=setup_cfg['T'])
 
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example,
-                        #   custom_visualize_fn=custom_visualize_fn_partial,
+                          custom_visualize_fn=custom_visualize_fn_partial,
+                          custom_loss=custom_loss,
                           shifted_sol_fn=batch_shifted_sol_fn,
                           traj_length=setup_cfg['rollout_length'])
 
@@ -851,337 +971,9 @@ def l2ws_run(run_cfg):
     run the workspace
     """
     workspace.run()
-    
-    
-def get_P(A, B, C, T, tau):
-    """
-    Construct QP matrices for a batch of problems with x0 as a decision variable:
-        min_{x0, z} (1/2) z^T z + tau * sum_t ||C x_t(x0, z) - y_t||_2^2
-        where x_t = A^t x0 + sum_{s=0}^{t-1} A^{t-1-s} B w_s
-
-    Args:
-        A (ndarray): (n x n) system dynamics matrix
-        B (ndarray): (n x m) control matrix
-        C (ndarray): (p x n) observation matrix
-        y_tensor (ndarray): (N x p x T) batch of measurements
-        tau (float): weight on measurement error
-
-    Returns:
-        P (ndarray): ((n + mT) x (n + mT)) shared quadratic matrix
-        c_mat (ndarray): (N x (n + mT)) linear term for each problem
-    """
-    # N, p, T = y_tensor.shape
-    n, m = B.shape
-
-    dim = n + m * T  # total dimension of decision variable [x0; z]
-    P = np.zeros((dim, dim))
-    # c_mat = np.zeros((N, dim))
-
-    # Precompute A powers
-    A_powers = [np.linalg.matrix_power(A, i) for i in range(T + 1)]
-
-    # Construct dynamic mappings: x_t = A^t x0 + M_t z
-    M_list = []
-    for t in range(T):
-        M_t = np.zeros((n, m * T))
-        for s in range(t):
-            A_term = A_powers[t - 1 - s]
-            M_t[:, m * s: m * (s + 1)] = A_term @ B
-        M_list.append(M_t)
-
-    # Quadratic term in z (control effort)
-    P[n:, n:] = np.eye(m * T) * 1e-3
-
-    # Add tau * ||C x_t(x0, z) - y_t||^2 terms
-    for t in range(T):
-        A_t = A_powers[t]
-        M_t = M_list[t]
-        C_A = C @ A_t
-        C_M = C @ M_t
-
-        # Update P (block structure)
-        P[:n, :n] += tau * C_A.T @ C_A
-        P[:n, n:] += tau * C_A.T @ C_M
-        P[n:, :n] += tau * C_M.T @ C_A
-        P[n:, n:] += tau * C_M.T @ C_M
-    return P
-        
-    
-def build_batched_qp(A, B, C, y_tensor, tau):
-    """
-    Construct QP matrices for a batch of problems with x0 as a decision variable:
-        min_{x0, z} (1/2) z^T z + tau * sum_t ||C x_t(x0, z) - y_t||_2^2
-        where x_t = A^t x0 + sum_{s=0}^{t-1} A^{t-1-s} B w_s
-
-    Args:
-        A (ndarray): (n x n) system dynamics matrix
-        B (ndarray): (n x m) control matrix
-        C (ndarray): (p x n) observation matrix
-        y_tensor (ndarray): (N x p x T) batch of measurements
-        tau (float): weight on measurement error
-
-    Returns:
-        P (ndarray): ((n + mT) x (n + mT)) shared quadratic matrix
-        c_mat (ndarray): (N x (n + mT)) linear term for each problem
-    """
-    N, p, T = y_tensor.shape
-    n, m = B.shape
-
-    dim = n + m * T  # total dimension of decision variable [x0; z]
-    P = np.zeros((dim, dim))
-    c_mat = np.zeros((N, dim))
-
-    # Precompute A powers
-    A_powers = [np.linalg.matrix_power(A, i) for i in range(T + 1)]
-
-    # Construct dynamic mappings: x_t = A^t x0 + M_t z
-    M_list = []
-    for t in range(T):
-        M_t = np.zeros((n, m * T))
-        for s in range(t):
-            A_term = A_powers[t - 1 - s]
-            M_t[:, m * s: m * (s + 1)] = A_term @ B
-        M_list.append(M_t)
-
-    # Quadratic term in z (control effort)
-    # P[n:, n:] = tau * np.eye(m * T)
-    # P[n:, n:] = np.eye(m * T) * 1
-
-    # # Add tau * ||C x_t(x0, z) - y_t||^2 terms
-    # for t in range(T):
-    #     A_t = A_powers[t]
-    #     M_t = M_list[t]
-    #     C_A = C @ A_t
-    #     C_M = C @ M_t
-
-    #     # Update P (block structure)
-    #     P[:n, :n] += tau * C_A.T @ C_A
-    #     P[:n, n:] += tau * C_A.T @ C_M
-    #     P[n:, :n] += tau * C_M.T @ C_A
-    #     P[n:, n:] += tau * C_M.T @ C_M
-    P = get_P(A, B, C, T, tau)
-
-
-    # Compute c_mat (one row per problem)
-    for i in range(N):
-        c_i = np.zeros(dim)
-        for t in range(T):
-            y_t = y_tensor[i, :, t]
-            A_t = A_powers[t]
-            M_t = M_list[t]
-
-            # c_i[:n] += -2 * C_A.T @ y_t
-            # c_i[n:] += -2 * C_M.T @ y_t
-            C_A = C @ A_t
-            C_M = C @ M_t
-            c_i[:n] += -1 * tau * C_A.T @ y_t
-            c_i[n:] += -1 * tau * C_M.T @ y_t
-        c_mat[i] = c_i
-
-    return P, c_mat
-
-
-def recover_states(z, A, B):
-    """
-    Recover full state trajectory from z = (x0, w0, ..., w_{T-1}).
-
-    Args:
-        z (ndarray): (n + m*T,) flattened vector of initial state and control inputs
-        A (ndarray): (n x n) state transition matrix
-        B (ndarray): (n x m) control input matrix
-
-    Returns:
-        x_mat (ndarray): (n x (T+1)) matrix of state trajectory
-    """
-    n, m = B.shape
-    T = (z.shape[0] - n) // m
-    x_mat = np.zeros((n, T + 1))
-
-    # Extract x0 and control sequence
-    x_mat[:, 0] = z[:n]
-    for t in range(T):
-        w_t = z[n + m * t : n + m * (t + 1)]
-        x_mat[:, t + 1] = A @ x_mat[:, t] + B @ w_t
-
-    return x_mat
 
 
 def setup_probs(setup_cfg):
-    print("entered robust kalman setup", flush=True)
-    cfg = setup_cfg
-    # N_train, N_test = cfg.N_train, cfg.N_test
-    # N = N_train + N_test
-    N = cfg.num_rollouts * cfg.rollout_length
-    
-    """
-    sample theta and get y for each problem
-    """
-    outs = []
-    for i in range(cfg.num_rollouts):
-        out = single_rollout_theta(cfg.rollout_length, cfg.T, cfg.gamma, cfg.dt, cfg.w_max, cfg.y_max)
-        outs.append(out)
-    theta_mat, y_mat, x_trues, w_trues, y_mat_rotated, x_trues_rotated, w_trues_rot, angles = compile_outs(outs)
-    
-    # y_mat = y_mat - y_mat.mean()
-    off_center = y_mat.mean(axis=2, keepdims=True)
-    y_mat = y_mat - off_center
-    x_trues = x_trues - off_center
-    
-    # create P, q_mat, l, u
-    A, B, C = robust_kalman_setup(cfg.gamma, cfg.dt)
-    P, q_mat = build_batched_qp(A, B, C, y_mat, cfg.mu)
-    n = P.shape[0]
-    l = -np.ones(n) * cfg.w_max
-    # l = l.at[:4].set(-np.inf)
-    l[:4] = -np.inf
-    u = np.ones(n) * cfg.w_max
-    # u = u.at[:4].set(np.inf)
-    u[:4] = np.inf
-    
-    c_param = cp.Parameter(n)
-    z = cp.Variable(n)
-    prob = cp.Problem(cp.Minimize(.5 * cp.quad_form(z, P) + c_param @ z), [l <= z, z <= u])
-    z_stars = np.zeros((N, n))
-    for i in range(N):
-        c_param.value = q_mat[i,:]
-        prob.solve(verbose=True)
-        z_stars[i,:] = z.value
-    
-    # transform z = (x_0, w_0, ..., w_{T-1}) to estimated states (x_0, ..., x_{T-1})
-    
-    # save the results
-    # save the data
-    output_filename = f"{os.getcwd()}/data_setup"
-    log.info("final saving final data...")
-    t0 = time.time()
-    jnp.savez(
-        output_filename,
-        thetas=theta_mat,
-        z_stars=z_stars,
-        q_mat=q_mat
-    )
-    for j in range(3):
-        start = j * cfg.rollout_length
-        for i in range(10):
-            x_mat = recover_states(z_stars[i+start,:], A, B)
-            plt.scatter(y_mat[i+start][0,:], y_mat[i+start][1,:])
-            plt.scatter(x_trues[i+start][0,:], x_trues[i+start][1,:])
-            plt.scatter(x_mat[0,:], x_mat[1,:])
-            plt.savefig(f'plot_{j}_{i}.pdf')
-            plt.clf()
-    import pdb
-    pdb.set_trace()
-    return
-
-    """
-    - canonicalize according to whether we have states or not
-    - extract information dependent on the setup
-    """
-    log.info("creating static canonicalization...")
-    t0 = time.time()
-    out_dict = static_canon(
-        cfg.T,
-        cfg.gamma,
-        cfg.dt,
-        cfg.mu,
-        cfg.rho,
-        cfg.B_const
-    )
-
-    t1 = time.time()
-    log.info(f"finished static canonicalization - took {t1-t0} seconds")
-
-    cones_dict = out_dict["cones_dict"]
-    A_sparse, P_sparse = out_dict["A_sparse"], out_dict["P_sparse"]
-
-    b, c = out_dict["b"], out_dict["c"]
-
-    m, n = A_sparse.shape
-
-    """
-    save output to output_filename
-    """
-    output_filename = f"{os.getcwd()}/data_setup"
-    
-    
-    data = dict(P=P_sparse, A=A_sparse, b=b, c=c)
-    tol_abs = cfg.solve_acc_abs
-    tol_rel = cfg.solve_acc_rel
-    solver = scs.SCS(data,
-                     cones_dict,
-                     normalize=False,
-                     scale=1,
-                     adaptive_scale=False,
-                     rho_x=1,
-                     alpha=1,
-                     acceleration_lookback=0,
-                     eps_abs=tol_abs,
-                     eps_rel=tol_rel)
-    # solve_times = np.zeros(N)
-    # x_stars = jnp.zeros((N, n))
-    # y_stars = jnp.zeros((N, m))
-    # s_stars = jnp.zeros((N, m))
-    # q_mat = jnp.zeros((N, m + n))
-
-    
-    
-    # out = sample_theta(N, cfg.T, cfg.sigma, cfg.p, cfg.gamma, cfg.dt,
-    #                    cfg.w_noise_var, cfg.y_noise_var, cfg.B_const)
-    # thetas_np, y_mat, x_trues, w_trues, y_mat_rotated, x_trues_rotated, w_trues_rot, angles = out
-    thetas = jnp.array(thetas_np)
-
-    batch_q = vmap(single_q, in_axes=(0, None, None, None, None, None), out_axes=(0))
-    q_mat = batch_q(thetas, cfg.mu, cfg.rho, cfg.T, cfg.gamma, cfg.dt)
-
-    # scs_instances = []
-
-
-    x_stars, y_stars, s_stars = setup_script(q_mat, thetas, solver, data, cones_dict, output_filename, solve=True)
-
-    time_limit = cfg.dt * cfg.T
-    ts, delt = np.linspace(0, time_limit, cfg.T-1, endpoint=True, retstep=True)
-
-    os.mkdir("states_plots")
-    os.mkdir("positions_plots")
-    for i in range(25):
-        x_state = x_stars[i, :cfg.T * 4]
-        x1_kalman = x_state[0::4]
-        x2_kalman = x_state[1::4]
-        x_kalman = jnp.stack([x1_kalman, x2_kalman])
-
-        # plot original
-        # rotate back the output, x_kalman
-        clockwise = False
-
-        x_kalman_rotated_transpose = rotation_single(x_kalman.T, angles[i], clockwise)
-        x_kalman_rotated = x_kalman_rotated_transpose.T
-
-        # plot original
-        plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
-                               ['True', 'KF recovery', 'Noisy'],
-                               filename=f"positions_plots/positions_{i}_noise.pdf",
-                               noise_only=True)
-        plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
-                               ['True', 'KF recovery', 'Noisy'],
-                               filename=f"positions_plots/positions_{i}.pdf")
-
-        plot_positions_overlay([x_kalman, y_mat_rotated[i, :, :]],
-                               ['True', 'KF recovery', 'Noisy'],
-                               grayscales=[1.0, 1.0, 1.0, 1.0, 1.0],
-                               filename=f"positions_plots/positions_{i}_rotated.pdf")
-        plot_positions_overlay_genL2O(y_mat[i, :, :], x_kalman_rotated,
-                                      filename=f"positions_plots/positions_{i}_genL2O.pdf")
-        # plot_positions_overlay([x_trues[i, :, :-1], x_kalman_rotated, y_mat[i, :, :]],
-        #                        ['True', 'KF recovery', 'Noisy'],
-        #                        filename=f"positions_plots/positions_{i}.pdf")
-
-        # plot_positions_overlay([x_trues_rotated[i, :, :-1], x_kalman, y_mat_rotated[i, :, :]],
-        #                        ['True', 'KF recovery', 'Noisy'],
-        #                        filename=f"positions_plots/positions_{i}_rotated.pdf")
-        
-    
-
-def setup_probs2(setup_cfg):
     print("entered robust kalman setup", flush=True)
     cfg = setup_cfg
     # N_train, N_test = cfg.N_train, cfg.N_test
@@ -1279,24 +1071,24 @@ def setup_probs2(setup_cfg):
         # rotate back the output, x_kalman
         clockwise = False
 
-        x_kalman_rotated_transpose = rotation_single(x_kalman.T, angles[i], clockwise)
-        x_kalman_rotated = x_kalman_rotated_transpose.T
+        # x_kalman_rotated_transpose = rotation_single(x_kalman.T, angles[i], clockwise)
+        # x_kalman_rotated = x_kalman_rotated_transpose.T
 
         # plot original
-        plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
-                               ['True', 'KF recovery', 'Noisy'],
-                               filename=f"positions_plots/positions_{i}_noise.pdf",
-                               noise_only=True)
-        plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
-                               ['True', 'KF recovery', 'Noisy'],
-                               filename=f"positions_plots/positions_{i}.pdf")
+        # plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
+        #                        ['True', 'KF recovery', 'Noisy'],
+        #                        filename=f"positions_plots/positions_{i}_noise.pdf",
+        #                        noise_only=True)
+        # plot_positions_overlay([x_kalman_rotated, y_mat[i, :, :]],
+        #                        ['True', 'KF recovery', 'Noisy'],
+        #                        filename=f"positions_plots/positions_{i}.pdf")
 
-        plot_positions_overlay([x_kalman, y_mat_rotated[i, :, :]],
+        plot_positions_overlay([x_kalman, y_mat[i, :, :]],
                                ['True', 'KF recovery', 'Noisy'],
                                grayscales=[1.0, 1.0, 1.0, 1.0, 1.0],
                                filename=f"positions_plots/positions_{i}_rotated.pdf")
-        plot_positions_overlay_genL2O(y_mat[i, :, :], x_kalman_rotated,
-                                      filename=f"positions_plots/positions_{i}_genL2O.pdf")
+        # plot_positions_overlay_genL2O(y_mat[i, :, :], x_kalman_rotated,
+        #                               filename=f"positions_plots/positions_{i}_genL2O.pdf")
         # plot_positions_overlay([x_trues[i, :, :-1], x_kalman_rotated, y_mat[i, :, :]],
         #                        ['True', 'KF recovery', 'Noisy'],
         #                        filename=f"positions_plots/positions_{i}.pdf")
@@ -1440,7 +1232,7 @@ def static_canon(T, gamma, dt, mu, rho, B_const, rho_x=1, scale=1):
     assert z_start + T == single_len * T
 
     # get A, B, C
-    Ad, Bd, C = robust_kalman_setup(gamma, dt) #, B_const)
+    Ad, Bd, C = robust_kalman_setup(gamma, dt, B_const)
 
     # Quadratic objective
     P = np.zeros((single_len, single_len))
@@ -1558,7 +1350,7 @@ def static_canon(T, gamma, dt, mu, rho, B_const, rho_x=1, scale=1):
     return out_dict
 
 
-def robust_kalman_setup(gamma, dt):
+def robust_kalman_setup(gamma, dt, B_const):
     A = jnp.zeros((4, 4))
     B = jnp.zeros((4, 2))
     C = jnp.zeros((2, 4))
@@ -1578,4 +1370,46 @@ def robust_kalman_setup(gamma, dt):
     C = C.at[0, 0].set(1)
     C = C.at[1, 1].set(1)
 
-    return A, B, C
+    return A, B * B_const, C
+
+
+"""
+pipeline is as follows
+
+static_canon --> given (nx, nu, T) get (P, c, A), also M and factor
+-- DONT store in memory
+
+setup data,
+-- input from cfg: (N, nx, nu, T)
+-- output: (x_stars, y_stars, s_stars, thetas, q_mat??)
+
+q_mat ?? we can directly get it from thetas in this case
+
+possibly for each example, pass in get_q_mat function
+"""
+
+
+def multiple_random_robust_kalman(N, T, gamma, dt, mu, rho, sigma, p, w_noise_var, y_noise_var):
+    out_dict = static_canon(T, gamma, dt, mu, rho, B_const=1)
+    P = jnp.array(out_dict['P_sparse'].todense())
+    A = jnp.array(out_dict['A_sparse'].todense())
+    cones = out_dict['cones_dict']
+
+    rollout_length = N
+    num_rollouts = 1
+    out = sample_theta(num_rollouts, rollout_length, T, sigma, p, gamma, dt,
+                       w_noise_var, y_noise_var, B_const=1)
+    # out = sample_theta(N, T, sigma, p, gamma, dt,
+    #                    w_noise_var, y_noise_var, B_const=1)
+    thetas_np, y_mat, x_trues, w_trues, y_mat_rotated, x_trues_rotated, w_trues_rot, angles = out
+    theta_mat = jnp.array(thetas_np)
+
+    batch_q = vmap(single_q, in_axes=(0, None, None, None, None, None), out_axes=(0))
+
+    q_mat = batch_q(theta_mat, mu, rho, T, gamma, dt)
+
+    return P, A, cones, q_mat, theta_mat
+
+
+if __name__ == "__main__":
+    test_kalman()
