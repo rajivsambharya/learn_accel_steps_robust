@@ -813,7 +813,7 @@ class Workspace:
                                    pac_bayes_cfg=cfg.pac_bayes_cfg,
                                    algo_dict=algo_dict)
 
-    def setup_opt_sols(self, algo, jnp_load_obj, N_train, N, num_plot=5):
+    def setup_opt_sols(self, algo, jnp_load_obj, N_train, N, num_plot=2):
         if algo != 'scs' and algo != 'lah_scs' and algo != 'lm_scs' and algo != 'lah_accel_scs':
             z_stars = jnp_load_obj['z_stars']
             z_stars_train = z_stars[self.train_indices, :]
@@ -864,8 +864,9 @@ class Workspace:
 
         # load the mean
         loaded_mean = jnp.load(f"{folder}/params.npz")
-        mean_params = loaded_mean['mean_params']
-
+        mean_params = jnp.array(loaded_mean['mean_params'])
+        # import pdb
+        # pdb.set_trace()
         self.l2ws_model.params = [mean_params]
 
 
@@ -883,21 +884,26 @@ class Workspace:
         jnp_load_obj = jnp.load(filename)
 
         if 'q_mat' in jnp_load_obj.keys():
+            np.random.seed(42)
             q_mat = jnp.array(jnp_load_obj['q_mat'])
 
             rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
             # rand_indices = np.arange(N)
+            # rand_indices = np.arange(1000)
 
-            # self.train_indices = rand_indices[:N_train]
-            self.train_indices = rand_indices[N_test: N_test + N_train]
+            self.train_indices = rand_indices[:N_train]
+            # self.train_indices = rand_indices[990:1000] #rand_indices[N_test: N_test + N_train]
             self.q_mat_train = q_mat[self.train_indices, :]
 
-            # self.test_indices = rand_indices[N_train:N_train + N_test]
-            self.test_indices = rand_indices[:N_test]
-            self.q_mat_test = q_mat[self.test_indices, :]
+            self.test_indices = rand_indices[N_train:N_train + N_test]
+            # self.test_indices = rand_indices[N_test: N_test + N_train] #rand_indices[990:1000]
+            # self.test_indices = rand_indices[:N_test]
+            self.q_mat_test = q_mat[self.test_indices, :] #* 2 #+ .1
 
             self.val_indices = rand_indices[N_train + N_test:]
             self.q_mat_val = q_mat[self.val_indices, :]
+            # import pdb
+            # pdb.set_trace()
             
         else:
             thetas = jnp.array(jnp_load_obj['thetas'])
@@ -1096,6 +1102,11 @@ class Workspace:
         self.setup_dataframes()
 
         if not self.skip_startup:
+            # load the weights AFTER the cold-start
+            if self.load_weights_datetime is not None:
+                self.load_weights(
+                    self.example, self.load_weights_datetime, self.nn_load_type)
+
             # no learning evaluation
             self.eval_iters_train_and_test('no_train', None)
 
@@ -1147,10 +1158,7 @@ class Workspace:
             # if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
             #     self.eval_iters_train_and_test('prev_sol', None)
 
-        # load the weights AFTER the cold-start
-        if self.load_weights_datetime is not None:
-            self.load_weights(
-                self.example, self.load_weights_datetime, self.nn_load_type)
+        
 
         # eval test data to start
         self.test_writer, self.test_logf, self.l2ws_model = test_eval_write(self.test_writer, 
@@ -1388,7 +1396,7 @@ class Workspace:
     def eval_iters_train_and_test(self, col, new_start_index):
         # try:
         #     # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
-        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:30,:])))
+        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:40,:])))
         #     print('PEPLOSS', pep_loss)
             
         #     # now save the result

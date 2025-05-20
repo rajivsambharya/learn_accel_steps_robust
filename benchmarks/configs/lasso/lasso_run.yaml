@@ -9,7 +9,7 @@ nn_cfg:
 data:
   datetime: ''
 
-train_unrolls: 40
+train_unrolls: 30
 eval_unrolls: 200
 eval_every_x_epochs: 50
 save_every_x_epochs: 1

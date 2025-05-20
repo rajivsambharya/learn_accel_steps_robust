@@ -132,8 +132,12 @@ class LAHAccelSCSmodel(L2Omodel):
                 n_iters = key #self.train_unrolls if key else 1
             else:
                 n_iters = min(iters, self.step_varying_num + 1)
-            
+            # if diff_required:
+            #     z0 = input
+            # else:
+            #     z0 = input + 100
             z0 = input
+            # z0 = z0.at[:200].set(100)
 
             if self.train_fn is not None:
                 train_fn = self.train_fn

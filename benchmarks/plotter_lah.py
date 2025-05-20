@@ -34,8 +34,9 @@ colors = cmap.colors
 def robust_kalman_plot_eval_iters(cfg):
     example = 'robust_kalman'
     # create_journal_results(example, cfg, train=False)
-    create_lah_results_constrained(example, cfg)
     rkf_vis(example, cfg)
+    create_lah_results_constrained(example, cfg)
+    
 
 
 @hydra.main(config_path='configs/maxcut', config_name='maxcut_plot.yaml')
@@ -972,6 +973,69 @@ def get_pep_data(example, dt):
     pep_loss = df.iloc[-1]
     
     return pep_loss
+
+
+def rkf_vis(example, cfg):
+    # get the data -- [rkf_lah_data, rk]
+    rkf_lah_vis, x_stars, thetas = get_rkf_vis_data(example, cfg.lah_vis_dt)
+    rkf_l2ws_vis, _, __ = get_rkf_vis_data(example, cfg.l2ws_vis_dt)
+    # rkf_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt)
+    # rkf_opt_vis = get_rkf_opt_data(example, cfg.lah_vis_dt)
+    # rkf_thetas_vis = get_rkf_thetas_data(example, cfg.lah_vis_dt)
+    import pdb
+    pdb.set_trace()
+
+    T = 50
+    num = thetas.shape[0] #300
+    # iter = 20
+
+    # for i in range(len(cfg.vis_indices)):
+    #     index = cfg.vis_indices[i]
+    for index in range(200):
+        titles = ['optimal solution', 'noisy trajectory']
+
+        y_mat_rotated = np.reshape(thetas[:num, :], (num, T, 2))
+
+        # for i in range(num):
+        x_true_kalman = get_x_kalman_from_x_primal(x_stars[index, :], T)
+        traj = [x_true_kalman, y_mat_rotated[index, :].T]
+
+        x_kalman_lah = get_x_kalman_from_x_primal(rkf_lah_vis[index,  :], T)
+        x_kalman_l2ws = get_x_kalman_from_x_primal(rkf_l2ws_vis[index,  :], T)
+        # x_kalman_lm = get_x_kalman_from_x_primal(rkf_lah_vis[index,  :], T)
+        
+        traj.append(x_kalman_l2ws)
+        traj.append(x_kalman_lah)
+        # traj.append(x_kalman_lm)
+        titles.append(f"lah")
+        titles.append(f"l2ws")
+        titles.append(f"lm")
+        plt.clf()
+        plot_positions_overlay(traj, titles, filename=f"positions_{index}.pdf", legend=False)
+        plot_positions_overlay(traj, titles, filename=f"positions_{index}_leg.pdf", legend=True)
+        print('y_mat_rotated', y_mat_rotated[index, :].T)
+        print('x_true_kalman', x_true_kalman)
+        print('x_kalman_lah', x_kalman_lah)
+
+
+def get_rkf_vis_data(example, dt):
+    orig_cwd = hydra.utils.get_original_cwd()
+    dt_path = f"{orig_cwd}/outputs/{example}/train_outputs/{dt}"
+
+    # iterate over all of the ones that start with train_epoch
+    directory = f"{dt_path}/visualize_test"
+    # last_folder = find_last_folder_starting_with(directory, 'train_epoch')
+    last_folder = 'no_train'
+
+    primals_file = f"{directory}/{last_folder}/x_primals.csv"
+    x_primals = read_csv(primals_file, header=None, index_col=0)
+
+    x_stars_file = f"{directory}/{last_folder}/x_stars.csv"
+    x_stars = read_csv(x_stars_file, header=None, index_col=0)
+
+    thetas_file = f"{directory}/{last_folder}/thetas.csv"
+    thetas = read_csv(thetas_file, header=None, index_col=0)
+    return x_primals.to_numpy(), x_stars.to_numpy(), thetas.to_numpy() #[1:, :]
     
 
 def get_eval_array(df, title):

@@ -523,7 +523,10 @@ class LAHISTAmodel(L2Omodel):
 
         @partial(jit, static_argnames=['iters', 'key'])
         def predict(params, input, q, iters, z_star, key, factor):
-            z0 = input
+            if diff_required:
+                z0 = input
+            else:
+                z0 = input #+ 10000
             
             # params[0] = params[0].at[0,1].set(jnp.log(1))
             if diff_required:

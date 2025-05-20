@@ -460,7 +460,7 @@ def plot_positions_overlay(traj, labels, num_dots=2, grayscales=[.8, .3, 1.0, 0.
     '''
     n = len(traj)
 
-    colors = ['green', 'red', 'blue', 'gray', 'orange']
+    colors = ['green', 'red', 'gray', 'blue',  'orange']
     # cmap = plt.cm.Set1
     # colors = [cmap.colors[0], cmap.colors[1], cmap.colors[2], cmap.colors[3], cmap.colors[4]]
     # linestyles = ['o', 'o', '-.', ':', '--']
@@ -714,6 +714,7 @@ def simulate_x_fwd(w_mat, T, gamma, dt, B_const):
     A, B, C = robust_kalman_setup(gamma, dt, B_const)
 
     x_mat = jnp.zeros((4, T + 1))
+    x_mat = x_mat.at[0,0].set(100)
 
     # simulate the system forward in time
     for t in range(T):
@@ -891,6 +892,7 @@ def run(run_cfg, lah=True):
 
     custom_visualize_fn_partial = partial(custom_visualize_fn, T=setup_cfg['T'])
     algo = 'lah_accel_scs' if lah else 'lm_scs'
+    algo = 'lah_scs'
 
     A = static_dict['A_sparse']
     m, n = A.shape

@@ -284,3 +284,12 @@ def custom_visualize(custom_visualize_fn, iterates_visualize, vis_num, thetas, z
                 custom_visualize_fn(z_all, z_stars, z_prev_sol, z_nn,
                                             thetas, iterates_visualize, visual_path,
                                             num=vis_num)
+        else:
+            if z_prev_sol is None:
+                custom_visualize_fn(z_all, z_stars, z_all, z_all,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)
+            else:
+                custom_visualize_fn(z_all, z_stars, z_all, z_all,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)                                    
