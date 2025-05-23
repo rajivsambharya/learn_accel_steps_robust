@@ -201,6 +201,8 @@ class L2Omodel(object):
         return state.value, params, state
 
     def evaluate(self, k, inputs, b, z_stars, fixed_ws, key, factors=None, tag='test', light=False):
+        return self.static_eval(k, inputs, b, z_stars, key, tag=tag, 
+                                    fixed_ws=fixed_ws, light=light)
         if self.factors_required and not self.factor_static_bool:
             return self.dynamic_eval(k, inputs, b, z_stars, 
                                      factors=factors, key=self.key, tag=tag, fixed_ws=fixed_ws)

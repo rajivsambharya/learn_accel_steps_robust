@@ -5,9 +5,6 @@ import jax.numpy as jnp
 import numpy as np
 from scipy import sparse
 from trajax import integrators
-from scipy.linalg import block_diag
-import scipy.sparse as sp
-import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +77,7 @@ def closed_loop_rollout(qp_solver, sim_len, x_init_traj, u0, dynamics,
     integrator = integrators.rk4(dynamics, dt=dt)
     n = T * (nx + nu)
     m = T * (2 * nx + 2 * nu)
-    # prev_sol = jnp.zeros(m + n)
+    # m = T * (2 * nx + 2 * nu)
     prev_sol = jnp.zeros(m + n)
 
     jnp.array([9.8, 0, 0, 0])
@@ -99,37 +96,31 @@ def closed_loop_rollout(qp_solver, sim_len, x_init_traj, u0, dynamics,
         print(j)
 
         # solve the qp
-        # ref_traj = get_curr_ref_traj(ref_traj_dict, j, obstacle_num, T)
-        ref_traj = get_curr_ref_traj(ref_traj_dict, j, obstacle_num, T+1)
+        ref_traj = get_curr_ref_traj(ref_traj_dict, j, obstacle_num, T)
 
         print('ref_traj', ref_traj)
         x_dot = dynamics(x0, u0, j)
-        sol, P, q, l, u = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
-        A = l
-        factor = u
-        # sol, P, A, factor, q = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
+        sol, P, A, factor, q = qp_solver(Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol)
         sols.append(sol)
         P_list.append(P)
         A_list.append(A)
         factor_list.append(factor)
         q_list.append(q)
-        # prev_sol = sol[:m + n]
-        prev_sol = None #sol[:m + n]
+        prev_sol = sol[:m + n]
         x0_list.append(x0)
         u0_list.append(u0)
         x_ref_list.append(ref_traj)
 
         # implement the first control
         old_u0 = u0
-        u0 = extract_first_control(sol, T, nx, nu, control_num=0) + old_u0
+        u0 = extract_first_control(sol, T, nx, nu, control_num=0)
         u0s[j, :] = u0
-        # for i in range(T):
-        #     print('u', i, extract_first_control(sol, T, nx, nu, control_num=i))
+        for i in range(T):
+            print('u', i, extract_first_control(sol, T, nx, nu, control_num=i))
         
-        clipped_u0 = u0
-        # clipped_u0 = jnp.clip(u0, a_min=u_min, a_max=u_max)
+
+        clipped_u0 = jnp.clip(u0, a_min=u_min, a_max=u_max)
         print('u0', clipped_u0)
-        print('sol', sol)
         if jnp.linalg.norm(clipped_u0 - u0) > 1e-2:
             violations += 1
             print('control val constraint violation', violations, jnp.linalg.norm(clipped_u0 - u0))
@@ -141,8 +132,8 @@ def closed_loop_rollout(qp_solver, sim_len, x_init_traj, u0, dynamics,
             print('control change constraint violation', violations, old_u0 - u0)
             # import pdb
             # pdb.set_trace()
-        # clipped_delta_u = jnp.clip(u0 - old_u0, a_min=-delta_u, a_max=delta_u)
-        # clipped_u0 = clipped_delta_u + old_u0
+        clipped_delta_u = jnp.clip(u0 - old_u0, a_min=-delta_u, a_max=delta_u)
+        clipped_u0 = clipped_delta_u + old_u0
 
         state_dot = dynamics(x0, clipped_u0, j)
         print('state_dot', state_dot)
@@ -153,13 +144,13 @@ def closed_loop_rollout(qp_solver, sim_len, x_init_traj, u0, dynamics,
             violations += 1
             print('box constraint violation', violations)
         print('x0', x0)
-        # print('expected x0', sol[:nx])
-        # print('expected x1', sol[nx:2*nx])
-        # print('expected x2', sol[2*nx:3*nx])
-        # print('expected x3', sol[3*nx:4*nx])
-        # print('expected x4', sol[4*nx:5*nx])
-        # print('final expected state', sol[(T-1)*nx:T*nx])
-        # print('final expected control', sol[(T-1)*nu + T*nx: T*nu + T*nx])
+        print('expected x0', sol[:nx])
+        print('expected x1', sol[nx:2*nx])
+        print('expected x2', sol[2*nx:3*nx])
+        print('expected x3', sol[3*nx:4*nx])
+        print('expected x4', sol[4*nx:5*nx])
+        print('final expected state', sol[(T-1)*nx:T*nx])
+        print('final expected control', sol[(T-1)*nu + T*nx: T*nu + T*nx])
 
         # check if the obstacle number should be updated
         # obstacle_num = update_obstacle_num(x0, ref_traj_dict, j, obstacle_num)
@@ -278,219 +269,7 @@ def get_curr_ref_traj(ref_traj_dict, t, obstacle_num, T):
 
 
 def extract_first_control(sol, T, nx, nu, control_num=0):
-    # return sol[T * nx + control_num * nu: T * nx + (control_num + 1) * nu]
-    return sol[:nu]
-
-
-
-# def static_canon_mpc_box_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, u_min, u_max, Q, QT, R):
-#     """
-#     Formulate condensed form MPC problem:
-#         min (1/2) z^T P z + c^T z
-#         s.t. l <= z <= u
-#     where z = [u_0^T, u_1^T, ..., u_{T-1}^T]^T
-
-#     Inputs:
-#         x_ref: (T+1, nx) desired reference trajectory
-#         x0: (nx,) initial condition
-#         Ad, Bd, cd: discrete dynamics: x_{t+1} = Ad x_t + Bd u_t + cd
-#         T: horizon
-#         nx, nu: state and control dimensions
-#         u_min, u_max: (nu,) vectors of lower/upper bounds on inputs
-#         Q, QT, R: cost matrices
-#     Outputs:
-#         Dictionary with keys: 'P', 'c', 'l', 'u'
-#     """
-#     # Precompute the state transition matrices
-#     Su = np.zeros((T * nx, T * nu))
-#     Sx = np.zeros((T * nx, nx))
-#     x_offset = np.zeros((T * nx, 1))
-
-#     A_power = np.eye(nx)
-#     for t in range(T):
-#         Sx[t * nx:(t + 1) * nx, :] = A_power
-#         x_offset[t * nx:(t + 1) * nx, 0] = cd @ A_power @ np.ones(nx)
-#         for k in range(t + 1):
-#             Ak = np.linalg.matrix_power(Ad, t - k)
-#             Su[t * nx:(t + 1) * nx, k * nu:(k + 1) * nu] = Ak @ Bd
-#         A_power = Ad @ A_power
-
-#     # Construct big cost matrices
-#     Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
-#     R_blk = block_diag(*([R] * T))
-
-#     # Reference trajectory (stacked)
-#     # x_ref_stack = x_ref[1:].reshape(-1, 1)  # skip x_0
-#     x_ref_stack = x_ref[:].reshape(-1, 1)
-
-#     # Condensed cost
-#     H = Su.T @ Q_blk @ Su + R_blk
-#     f = Su.T @ Q_blk @ (Sx @ x0.reshape(-1, 1) - x_ref_stack + x_offset)
-
-#     # Input constraints (box)
-#     l = np.tile(u_min, T)
-#     u = np.tile(u_max, T)
-
-#     return {'P': H, 'c': f.flatten(), 'l': l, 'u': u}
-#     out_dict = {'P': P, 'c': c, 'l': l, 'u': u}
-#     return out_dict
-
-def build_cumsum_matrix(T, nu):
-    """
-    Returns matrix A such that u = A @ delta_u + 1 ⊗ u_prev
-    """
-    A = np.zeros((T * nu, T * nu))
-    for t in range(T):
-        for i in range(t + 1):
-            A[t * nu:(t + 1) * nu, i * nu:(i + 1) * nu] += np.eye(nu)
-    return A
-
-
-# def static_canon_mpc_du_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, du_min, du_max, Q, QT, R, u_prev):
-#     """
-#     Returns: dict with keys 'P', 'c', 'l', 'u' for reduced QP in delta-u variables.
-#     """
-#     # --- 1. Input reconstruction ---
-#     A_cumsum = build_cumsum_matrix(T, nu)  # maps delta-u to u
-#     u_prev_stack = np.tile(u_prev, T)
-#     u_full = lambda z: A_cumsum @ z + u_prev_stack
-
-#     # --- 2. Build state transition matrix ---
-#     S = np.zeros((T * nx, T * nu))  # maps delta-u to x_{1:T}
-#     d = np.zeros((T * nx, ))        # affine offset from x0, u_prev, cd
-
-#     A_power = Ad.copy()
-#     for t in range(T):
-#         for k in range(t + 1):
-#             Ak = np.linalg.matrix_power(Ad, t - k)
-#             # S[t * nx:(t + 1) * nx, k * nu:(k + 1) * nu] += Ak @ Bd @ A_cumsum[k * nu:(k + 1) * nu, :]
-#             S[t * nx:(t + 1) * nx, :] += Ak @ Bd @ A_cumsum[k * nu:(k + 1) * nu, :]
-#         # offset = A^t x0 + sum_{j=0}^{t-1} A^{t-1-j} cd
-#         A_t_x0 = np.linalg.matrix_power(Ad, t + 1) @ x0
-#         # cd_sum = sum(np.linalg.matrix_power(Ad, t - 1 - j) @ cd for j in range(t)) if t > 0 else np.zeros(nx)
-#         cd_sum = sum(np.linalg.matrix_power(Ad, t - j) @ cd for j in range(t + 1))
-#         u0_effect = sum(np.linalg.matrix_power(Ad, t - k) @ Bd @ u_prev for k in range(t + 1))
-#         d[t * nx:(t + 1) * nx] = A_t_x0 + u0_effect + cd_sum
-
-#     # --- 3. Cost matrices ---
-#     Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
-#     R_blk = block_diag(*([R] * T))
-
-#     # Reference trajectory stacked
-#     x_ref_stack = x_ref[1:].reshape(T * nx)
-
-#     # Final cost terms
-#     P = S.T @ Q_blk @ S + A_cumsum.T @ R_blk @ A_cumsum
-#     c = S.T @ Q_blk @ (d - x_ref_stack) + A_cumsum.T @ R_blk @ u_prev_stack
-
-#     # Box constraints on delta u
-#     l = np.tile(du_min, T)
-#     u = np.tile(du_max, T)
-    
-#     # import pdb
-#     # pdb.set_trace()
-
-#     return {'P': P, 'c': c, 'l': l, 'u': u, 'S': S, 'd': d, 'Q_blk': Q_blk, 'A_cumsum': A_cumsum}
-
-def static_canon_mpc_du_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, du_min, du_max, Q, QT, R, u_prev):
-    """
-    Returns: dict with keys 'P', 'c', 'l', 'u' for reduced QP in delta-u variables.
-    """
-    # --- 1. Input reconstruction ---
-    A_cumsum = build_cumsum_matrix(T, nu)  # maps delta-u to u
-    u_prev_stack = np.tile(u_prev, T)
-    u_full = lambda z: A_cumsum @ z + u_prev_stack
-
-    # --- 2. Build state transition matrix ---
-    S = np.zeros((T * nx, T * nu))  # maps delta-u to x_{1:T}
-    d = np.zeros((T * nx, ))        # affine offset from x0, u_prev, cd
-
-    for t in range(T):
-        for k in range(t + 1):
-            Ak = np.linalg.matrix_power(Ad, t - k)
-            S[t * nx:(t + 1) * nx, :] += Ak @ Bd @ A_cumsum[k * nu:(k + 1) * nu, :]
-
-        # Corrected cd_sum: ∑_{j=0}^t A^{t-j} @ cd
-        cd_sum = sum(np.linalg.matrix_power(Ad, t - j) @ cd for j in range(t + 1))
-        A_t_x0 = np.linalg.matrix_power(Ad, t + 1) @ x0
-        u0_effect = sum(np.linalg.matrix_power(Ad, t - k) @ Bd @ u_prev for k in range(t + 1))
-
-        d[t * nx:(t + 1) * nx] = A_t_x0 + u0_effect + cd_sum
-
-    # --- 3. Cost matrices ---
-    # Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
-    # R_blk = block_diag(*([R] * T))
-    gamma = 0.9  # example discount factor
-    R_blk = block_diag(*[gamma**t * R for t in range(T)])
-    Q_blk = block_diag(*[gamma**t * Q for t in range(T - 1)] + [gamma**(T-1) * QT])
-
-    # Reference trajectory stacked
-    x_ref_stack = x_ref[1:].reshape(T * nx)
-
-    # Final cost terms
-    P = S.T @ Q_blk @ S + A_cumsum.T @ R_blk @ A_cumsum
-    c = S.T @ Q_blk @ (d - x_ref_stack) + A_cumsum.T @ R_blk @ u_prev_stack
-
-    # Box constraints on delta u
-    l = np.tile(du_min, T)
-    u = np.tile(du_max, T)
-    # import pdb
-    # pdb.set_trace()
-
-    return {'P': P, 'c': c, 'l': l, 'u': u, 'S': S, 'd': d, 'Q_blk': Q_blk, 'A_cumsum': A_cumsum}
-
-
-
-def static_canon_mpc_box_qp(x_ref, x0, Ad, Bd, cd, T, nx, nu, u_min, u_max, Q, QT, R, u_prev):
-    Su = np.zeros((T * nx, T * nu))
-    Sx = np.zeros((T * nx, nx))
-    x_offset = np.zeros((T * nx, 1))
-
-    for t in range(T):
-        A_power = np.linalg.matrix_power(Ad, t + 1)
-        Sx[t * nx:(t + 1) * nx, :] = A_power
-        for k in range(t + 1):
-            Ak = np.linalg.matrix_power(Ad, t - k)
-            Su[t * nx:(t + 1) * nx, k * nu:(k + 1) * nu] = Ak @ Bd
-        # Add constant offset term: sum_{j=0}^{t} A^{t-1-j} cd
-        x_offset[t * nx:(t + 1) * nx, 0] = sum(np.linalg.matrix_power(Ad, t - 1 - j) @ cd for j in range(t))
-        
-    # Build D: difference operator such that D @ z = [u_1 - u_0, ..., u_{T-1} - u_{T-2}]
-    rows, cols, data = [], [], []
-    for t in range(1, T):
-        for i in range(nu):
-            idx = (t - 1) * nu + i
-            rows.extend([idx, idx])
-            cols.extend([t * nu + i, (t - 1) * nu + i])
-            data.extend([1.0, -1.0])
-    D = sp.coo_matrix((data, (rows, cols)), shape=((T - 1) * nu, T * nu)).tocsr()
-
-    # Smoothness penalty
-    lambda_init = 1
-    smooth_penalty = lambda_init * (D.T @ D)
-
-    Q_blk = block_diag(*([Q] * (T - 1) + [QT]))
-    R_blk = block_diag(*([R] * T)) + smooth_penalty
-
-    x_ref_stack = x_ref[:].reshape(T * nx, 1)
-
-    H = Su.T @ Q_blk @ Su + R_blk
-    f = Su.T @ Q_blk @ (Sx @ x0.reshape(-1, 1) + x_offset - x_ref_stack)
-    # f = Su.T @ Q_blk @ (Sx @ x0.reshape(-1, 1) - x_ref_stack)
-
-    l = np.tile(u_min, T)
-    u = np.tile(u_max, T)
-    # import pdb
-    # pdb.set_trace()
-    c = f.flatten()
-    E = np.zeros((nu, T * nu))
-    E[:, :nu] = np.eye(nu)
-
-    H += lambda_init * (E.T @ E)
-    c += -lambda_init * (E.T @ u_prev)
-
-    return {'P': H, 'c': c, 'l': l, 'u': u}
-
+    return sol[T * nx + control_num * nu: T * nx + (control_num + 1) * nu]
 
 
 def static_canon_mpc_osqp(x_ref, x0, Ad, Bd, cd, T, nx, nu, x_min, x_max, u_min, u_max, Q, QT, R,
@@ -569,8 +348,14 @@ def static_canon_mpc_osqp(x_ref, x0, Ad, Bd, cd, T, nx, nu, x_min, x_max, u_min,
         )
 
         zeros_sparse = sparse.coo_matrix(np.zeros((T * nu, T * nx)))
+        # A_deltau_sparse = sparse.coo_matrix(A_deltau)
+
+        # import pdb
+        # pdb.set_trace()
 
         A_deltau_full = sparse.hstack([zeros_sparse, A_deltau])
+        # import pdb
+        # pdb.set_trace()
 
         A_ineq = sparse.vstack(
             [A_minmax,
@@ -602,6 +387,11 @@ def static_canon_mpc_osqp(x_ref, x0, Ad, Bd, cd, T, nx, nu, x_min, x_max, u_min,
             [x_max_vec, u_max_vec, delta_u + u_prev, delta_u_tiled])
         b_lower = np.hstack(
             [x_min_vec, u_min_vec, -delta_u + u_prev, -delta_u_tiled])
+        # import pdb
+        # pdb.set_trace()
+        # b_upper[T * (nx + nu): T * (nx + nu) + nu] = delta_u + u_prev
+        # b_lower[T * (nx + nu): T * (nx + nu) + nu] = -delta_u + u_prev
+        
 
     # set beq
     beq = np.zeros(T * nx)

@@ -32,6 +32,7 @@ from lah.lah_osqp_model import LAHOSQPmodel
 from lah.lah_scs_model import LAHSCSmodel
 from lah.lm_scs_model import LMSCSmodel
 from lah.lm_osqp_model import LMOSQPmodel
+from lah.lah_osqp_accel_model import LAHAccelOSQPmodel
 from lah.launcher_helper import (
     compute_kl_inv_vector,
     get_nearest_neighbors,
@@ -61,7 +62,7 @@ from lah.launcher_writer import (
 from lah.osqp_model import OSQPmodel
 from lah.scs_model import SCSmodel
 from lah.utils.generic_utils import setup_permutation
-
+from jax import vmap
 
 
 class Workspace:
@@ -146,11 +147,12 @@ class Workspace:
         # load the data from problem to problem
         jnp_load_obj = self.load_setup_data(example, cfg.data.datetime, N_train, N_test, N_val)
         thetas = jnp.array(jnp_load_obj['thetas'])
-        thetas_ood = jnp.array(jnp_load_obj['thetas_ood'])
+        thetas_ood = jnp.array(jnp_load_obj['thetas_ood']) if 'thetas_ood' in jnp_load_obj.keys() else None
 
         self.thetas_train = thetas[self.train_indices, :]
         self.thetas_test = thetas[self.test_indices, :]
-        self.thetas_val = thetas_ood[self.val_indices, :]
+        if self.val_indices is not None:
+            self.thetas_val = thetas_ood[self.val_indices, :]
 
         train_inputs, test_inputs, normalize_col_sums, normalize_std_dev = normalize_inputs_fn(
             self.normalize_inputs, thetas, self.train_indices, self.test_indices)
@@ -208,6 +210,8 @@ class Workspace:
             self.create_lah_accel_gd_model(cfg, static_dict)
         elif algo == 'lah_accel_scs':
             self.create_lah_accel_scs_model(cfg, static_dict)
+        elif algo == 'lah_accel_osqp':
+            self.create_lah_accel_osqp_model(cfg, static_dict)
         elif algo == 'lah_accel_box_qp':
             self.create_lah_box_qp_accel_model(cfg, static_dict)
         
@@ -692,6 +696,106 @@ class Workspace:
                                         nn_cfg=cfg.nn_cfg,
                                         loss_method=cfg.loss_method,
                                         algo_dict=algo_dict)
+    
+    def create_lah_accel_osqp_model(self, cfg, static_dict):
+        if self.static_flag:
+            factor = static_dict['factor']
+            A = static_dict['A']
+            P = static_dict['P']
+            m, n = A.shape
+            self.m, self.n = m, n
+            rho = static_dict['rho']
+            input_dict = dict(factor_static_bool=True,
+                              supervised=cfg.supervised,
+                              rho=rho,
+                              q_mat_train=self.q_mat_train,
+                              q_mat_test=self.q_mat_test,
+                              A=A,
+                              P=P,
+                              m=m,
+                              n=n,
+                              factor=factor,
+                            #   train_inputs=self.train_inputs,
+                            #   test_inputs=self.test_inputs,
+                            #   train_unrolls=self.train_unrolls,
+                            #   eval_unrolls=self.eval_unrolls,
+                            #   nn_cfg=cfg.nn_cfg,
+                            #   z_stars_train=self.z_stars_train,
+                            #   z_stars_test=self.z_stars_test,
+                            #   jit=True,
+                              plateau_decay=cfg.plateau_decay)
+        else:
+            self.m, self.n = static_dict['m'], static_dict['n']
+            m, n = self.m, self.n
+            rho_vec = jnp.ones(m)
+            l0 = self.q_mat_train[0, n: n + m]
+            u0 = self.q_mat_train[0, n + m: n + 2 * m]
+            rho_vec = rho_vec.at[l0 == u0].set(1000)
+
+            t0 = time.time()
+
+            # form matrices (N, m + n, m + n) to be factored
+            # nc2 = int(n * (n + 1) / 2)
+            # q_mat = jnp.vstack([self.q_mat_train, self.q_mat_test])
+            # N_train, _ = self.q_mat_train.shape[0], self.q_mat_test[0]
+            # N = q_mat.shape[0]
+            # unvec_symm_batch = vmap(unvec_symm, in_axes=(0, None), out_axes=(0))
+            # P_tensor = unvec_symm_batch(q_mat[:, 2 * m + n: 2 * m + n + nc2], n)
+            # A_tensor = jnp.reshape(q_mat[:, 2 * m + n + nc2:], (N, m, n))
+            # sigma = 1
+            # batch_form_osqp_matrix = vmap(
+            #     form_osqp_matrix, in_axes=(0, 0, None, None), out_axes=(0))
+
+            # try batching
+            # cutoff = 4000
+            # matrices1 = batch_form_osqp_matrix(
+            #     P_tensor[:cutoff, :, :], A_tensor[:cutoff, :, :], rho_vec, sigma)
+            # matrices2 = batch_form_osqp_matrix(
+            #     P_tensor[cutoff:, :, :], A_tensor[cutoff:, :, :], rho_vec, sigma)
+            # matrices =
+
+            # do factors
+            # factors0, factors1 = self.batch_factors(self.q_mat_train)
+            # batch_lu_factor = vmap(jsp.linalg.lu_factor, in_axes=(0,), out_axes=(0, 0))
+            # factors10, factors11 = batch_lu_factor(matrices1)
+            # factors20, factors21 = batch_lu_factor(matrices2)
+            # factors0 = jnp.vstack([factors10, factors20])
+            # factors1 = jnp.vstack([factors11, factors21])
+
+            t1 = time.time()
+            print('batch factor time', t1 - t0)
+
+            # self.factors_train = (factors0[:N_train, :, :], factors1[:N_train, :])
+            # self.factors_test = (factors0[N_train:N, :, :], factors1[N_train:N, :])
+
+            input_dict = dict(factor_static_bool=False,
+                              supervised=cfg.supervised,
+                              rho=rho_vec,
+                              q_mat_train=self.q_mat_train,
+                              q_mat_test=self.q_mat_test,
+                              m=self.m,
+                              n=self.n,
+                              train_inputs=self.train_inputs,
+                              test_inputs=self.test_inputs,
+                            #   factors_train=self.factors_train,
+                            #   factors_test=self.factors_test,
+                            #   train_unrolls=self.train_unrolls,
+                            #   eval_unrolls=self.eval_unrolls,
+                            #   nn_cfg=cfg.nn_cfg,
+                            #   z_stars_train=self.z_stars_train,
+                            #   z_stars_test=self.z_stars_test,
+                              jit=True)
+        self.x_stars_train = self.z_stars_train[:, :self.n]
+        self.x_stars_test = self.z_stars_test[:, :self.n]
+        self.l2ws_model = LAHAccelOSQPmodel(train_unrolls=self.train_unrolls,
+                                    eval_unrolls=self.eval_unrolls,
+                                    train_inputs=self.train_inputs,
+                                    test_inputs=self.test_inputs,
+                                    regression=cfg.supervised,
+                                    nn_cfg=cfg.nn_cfg,
+                                    z_stars_train=self.z_stars_train,
+                                    z_stars_test=self.z_stars_test,
+                                    algo_dict=input_dict)
         
     def create_lm_scs_model(self, cfg, static_dict):
         static_M = static_dict['M']
@@ -919,6 +1023,7 @@ class Workspace:
                 self.q_mat_val = q_mat_ood[self.val_indices, :]
             else:
                 self.val = False
+                self.val_indices = None
 
         else:
             thetas = jnp.array(jnp_load_obj['thetas'])
@@ -1567,7 +1672,7 @@ class Workspace:
 
     def get_inputs_for_eval(self, fixed_ws, num, train, col):
         if col == 'nearest_neighbor':
-            is_osqp = isinstance(self.l2ws_model, OSQPmodel) or isinstance(self.l2ws_model, LAHOSQPmodel)
+            is_osqp = isinstance(self.l2ws_model, OSQPmodel) or isinstance(self.l2ws_model, LAHOSQPmodel) or isinstance(self.l2ws_model, LAHAccelOSQPmodel)
             if is_osqp:
                 m, n = self.l2ws_model.m, self.l2ws_model.n
             else:
@@ -1592,7 +1697,7 @@ class Workspace:
                 self.z_stars_test[:num, :][non_last_indices, :])
         else:
             if self.l2ws_model.lah:
-                if isinstance(self.l2ws_model, LAHOSQPmodel):
+                if isinstance(self.l2ws_model, LAHOSQPmodel) or isinstance(self.l2ws_model, LAHAccelOSQPmodel):
                     m, n = self.l2ws_model.m, self.l2ws_model.n
                     if train == 'train':
                         inputs = self.l2ws_model.z_stars_train[:num, :m + n] * 0

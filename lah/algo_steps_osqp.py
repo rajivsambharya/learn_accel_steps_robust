@@ -251,7 +251,7 @@ def fp_eval_osqp(i, val, supervised, z_star, factor, P, A, q, rho, sigma, custom
     return z_next, loss_vec, z_all, primal_residuals, dual_residuals
 
 
-def fixed_point_osqp(z, factor1, factor2, A, q, rho, sigma):
+def fixed_point_osqp(z, factor1, factor2, A, q, rho, sigma, alpha):
     # z = (x, y, w) w is the z variable in osqp terminology
     m, n = A.shape
     x, y, w = z[:n], z[n:n + m], z[n + m:]
@@ -262,17 +262,17 @@ def fixed_point_osqp(z, factor1, factor2, A, q, rho, sigma):
     rhs = sigma * x - c + A.T @ (rho * w - y)
     factor = (factor1, factor2)
 
-    x_next = lin_sys_solve(factor, rhs)
+    x_next = alpha * lin_sys_solve(factor, rhs) + (1 - alpha) * x
     nu = rho * (A @ x_next - w) + y
 
     # update w_tilde
     w_tilde = w + (nu - y) / rho
 
     # update w
-    w_next = jnp.clip(w_tilde + y / rho, a_min=l_bound, a_max=u_bound)
+    w_next = jnp.clip(alpha * w_tilde + (1 - alpha) * w + y / rho, a_min=l_bound, a_max=u_bound)
 
     # update y
-    y_next = y + rho * (w_tilde - w_next)
+    y_next = y + rho * (alpha * w_tilde + (1 - alpha) * w - w_next)
 
     # concatenate into the fixed point vector
     z_next = jnp.concatenate([x_next, y_next, w_next])
@@ -385,8 +385,8 @@ def fp_train_lah_osqp(i, val, supervised, z_star, all_factors, A, idx_mapping, q
     z, loss_vec = val
 
     factors1, factors2 = all_factors
-    idx = idx_mapping[i]
-    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx])
+    idx = 0 #idx_mapping[i]
+    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx], alphas[i])
     if supervised:
         diff = jnp.linalg.norm(z_next - z_star)
     else:
@@ -399,10 +399,11 @@ def fp_eval_lah_osqp(i, val, supervised, z_star, all_factors, P, A, idx_mapping,
                        custom_loss=None, lightweight=False):
     m, n = A.shape
     z, loss_vec, z_all, primal_residuals, dual_residuals = val
-    idx = idx_mapping[i]
+    idx = 0 #idx_mapping[i]
 
     factors1, factors2 = all_factors
-    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx])
+    
+    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx], alphas[i])
     if custom_loss is None:
         if supervised:
             diff = jnp.linalg.norm(z - z_star)
