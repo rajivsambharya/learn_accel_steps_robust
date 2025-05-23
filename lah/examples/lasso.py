@@ -30,7 +30,7 @@ def run(run_cfg, model='lah'):
     ista_step =  1 / evals.max()
     lambd = setup_cfg['lambd']
 
-    static_dict = dict(A=A, lambd=lambd, ista_step=ista_step)
+    static_dict = dict(A=A, lambd=lambd, ista_step=ista_step, accel=run_cfg.accel)
 
     # we directly save q now
     static_flag = True
@@ -40,6 +40,7 @@ def run(run_cfg, model='lah'):
         algo = 'ista'
     elif model == 'lm':
         algo = 'lm_ista'
+
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
 
     # run the workspace
@@ -66,7 +67,12 @@ def setup_probs(setup_cfg):
     D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
     D = D / np.linalg.norm(D, axis=0)
 
-    z_orig = np.random.normal(size=(N, n_orig))
+    # z_orig = np.random.normal(size=(N, n_orig))
+    ood_num = setup_cfg['N_ood']
+    z_orig = np.vstack([
+        np.random.normal(scale=cfg.ood_mult, size=(ood_num, n_orig)),
+        np.random.normal(scale=1.0, size=(N - ood_num, n_orig))
+    ])
     mask = np.random.choice(2, size=(N, n_orig), replace=True, p=[0.9, 0.1])
     z_stars = np.multiply(z_orig, mask)
 
@@ -87,7 +93,9 @@ def setup_probs(setup_cfg):
     # save output to output_filename
     output_filename = f"{os.getcwd()}/data_setup"
 
-    ista_setup_script(b_mat, D, lambd, output_filename)
+    
+    # b_mat[:ood_num] = b_mat[:ood_num] * 2
+    ista_setup_script(b_mat, D, lambd, output_filename, ood_num=ood_num)
     # jnp.savez(
     #     output_filename,
     #     thetas=jnp.array(b_mat),

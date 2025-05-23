@@ -3,7 +3,7 @@ nn_cfg:
   lr: 1e-2
   method: adam
   batch_size: 1000
-  epochs: 2000
+  epochs: 4000
 
 
 data:
@@ -29,3 +29,4 @@ accuracies: [.1, .01, .001, .0001]
 
 pep_regularizer_coeff: 0 #10
 pep_target: 0.1
+accel: False

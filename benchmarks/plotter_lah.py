@@ -64,6 +64,7 @@ def logistic_regression_plot_eval_iters(cfg):
 def lasso_plot_eval_iters(cfg):
     example = 'lasso'
     create_lah_results_unconstrained(example, cfg)
+    create_lah_results_unconstrained(example, cfg, split='val')
     # plot_step_sizes_lasso(example, cfg)
     plot_step_sizes(example, cfg)
 
@@ -597,11 +598,11 @@ def find_last_folder_starting_with(directory, prefix):
     return last_folder
 
 
-def create_lah_results_unconstrained(example, cfg):
+def create_lah_results_unconstrained(example, cfg, split='test'):
     # for each method, get the data (dist_opt, pr, dr, pr_dr_max)
     # dictionary: method -> list of dist_
     # looks something like: results['l2ws']['pr'] = primal_residuals
-    results_dict = populate_results_dict(example, cfg, constrained=False)
+    results_dict = populate_results_dict(example, cfg, constrained=False, split=split)
 
     # calculate the accuracies
     accs_dict = populate_accs_dict(results_dict, constrained=False)
@@ -616,7 +617,7 @@ def create_lah_results_unconstrained(example, cfg):
     # takes a different form accuracies_dict['lah'][0.01] = reduction (it is a single fraction)
 
     # do the plotting
-    plot_results_dict_unconstrained(example, results_dict, gains_dict, cfg.num_iters)
+    plot_results_dict_unconstrained(example, results_dict, gains_dict, cfg.num_iters, split=split)
 
     # create the tables (need the accuracies and reductions for this)
     create_acc_reduction_tables(accs_dict, acc_reductions_dict)
@@ -722,7 +723,7 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
     plt.savefig('pr_dr.pdf', bbox_inches='tight')
 
 
-def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters):
+def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters, split='test'):
     # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
@@ -757,7 +758,10 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
         
 
     plt.tight_layout()
-    plt.savefig('obj_diff.pdf', bbox_inches='tight')
+    if split == 'test':
+        plt.savefig('obj_diff_test.pdf', bbox_inches='tight')
+    elif split == 'val':
+        plt.savefig('obj_diff_val.pdf', bbox_inches='tight')
     plt.clf()
 
 
@@ -825,11 +829,11 @@ def populate_gains_dict(results_dict, num_iters, constrained=True):
 #         results_dict[method] = curr_method_dict
 
 #     return results_dict
-def populate_results_dict(example, cfg, constrained=True):
+def populate_results_dict(example, cfg, constrained=True, split='test'):
     results_dict = {}
     for method in cfg.methods:
         # if method[:2] != 'LB' and method[:2] != 'UB':
-        curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained)
+        curr_method_dict = populate_curr_method_dict(method, example, cfg, constrained, split=split)
         results_dict[method] = curr_method_dict
 
         # curr_method_dict is a dict of 
@@ -925,7 +929,9 @@ def get_accs():
 #     curr_method_dict = {'obj_diff': obj_diffs}
 
 #     return curr_method_dict
-def populate_curr_method_dict(method, example, cfg, constrained):
+def populate_curr_method_dict(method, example, cfg, constrained, split='test'):
+    assert split in ['test', 'val'], "split must be either 'test' or 'val'"
+
     # get the datetime
     dt = cfg['methods'][method]
 
@@ -933,22 +939,18 @@ def populate_curr_method_dict(method, example, cfg, constrained):
     col = method2col(method)
 
     if constrained:
-        primal_residuals = recover_data(example, dt, 'primal_residuals_test.csv', col)
-        dual_residuals = recover_data(example, dt, 'dual_residuals_test.csv', col)
-        pr_dr_maxes = recover_data(example, dt, 'pr_dr_max_test.csv', col)
-        # dist_opts = recover_data(example, dt, 'dist_opts_df_test.csv', col)
+        primal_residuals = recover_data(example, dt, f'primal_residuals_{split}.csv', col)
+        dual_residuals = recover_data(example, dt, f'dual_residuals_{split}.csv', col)
+        pr_dr_maxes = recover_data(example, dt, f'pr_dr_max_{split}.csv', col)
+        # dist_opts = recover_data(example, dt, f'dist_opts_df_{split}.csv', col)
 
-        # populate with pr, dr, pr_dr_max, dist_opt
-        curr_method_dict = {'pr': np.clip(primal_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'dr': np.clip(dual_residuals,  a_min=cfg.get('minval', 1e-10), a_max=1e5), 
-                            'pr_dr_max': pr_dr_maxes} #,
-                            # 'dist_opts': dist_opts}
+        curr_method_dict = {
+            'pr': np.clip(primal_residuals, a_min=cfg.get('minval', 1e-10), a_max=1e5),
+            'dr': np.clip(dual_residuals, a_min=cfg.get('minval', 1e-10), a_max=1e5),
+            'pr_dr_max': pr_dr_maxes
+        }
     else:
-        obj_diffs = recover_data(example, dt, 'obj_vals_diff_test.csv', col)
-        # if example == 'ridge_regression' and method[:3] == 'lah':
-        #     step_sizes_dict = get_lah_gd_step_size(example, cfg)
-        #     lah_step_sizes = step_sizes_dict[method].to_numpy()[:, 1]
-        #     obj_diffs = ridge_get_subopts(example, cfg, lah_step_sizes)
+        obj_diffs = recover_data(example, dt, f'obj_vals_diff_{split}.csv', col)
         curr_method_dict = {'obj_diff': obj_diffs}
 
     return curr_method_dict
@@ -976,10 +978,14 @@ def get_pep_data(example, dt):
 
 
 def rkf_vis(example, cfg):
+    rkf_vis_ood_option(example, cfg, False)
+    rkf_vis_ood_option(example, cfg, True)
+
+def rkf_vis_ood_option(example, cfg, ood):
     # get the data -- [rkf_lah_data, rk]
-    rkf_lah_vis, x_stars, thetas = get_rkf_vis_data(example, cfg.lah_vis_dt)
-    rkf_l2ws_vis, _, __ = get_rkf_vis_data(example, cfg.l2ws_vis_dt)
-    # rkf_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt)
+    rkf_lah_vis, x_stars, thetas = get_rkf_vis_data(example, cfg.lah_vis_dt, ood=ood)
+    rkf_l2ws_vis, _, __ = get_rkf_vis_data(example, cfg.l2ws_vis_dt, ood=ood)
+    rkf_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt, ood=ood, nn=True)
     # rkf_opt_vis = get_rkf_opt_data(example, cfg.lah_vis_dt)
     # rkf_thetas_vis = get_rkf_thetas_data(example, cfg.lah_vis_dt)
     import pdb
@@ -987,11 +993,8 @@ def rkf_vis(example, cfg):
 
     T = 50
     num = thetas.shape[0] #300
-    # iter = 20
 
-    # for i in range(len(cfg.vis_indices)):
-    #     index = cfg.vis_indices[i]
-    for index in range(200):
+    for index in range(rkf_lah_vis.shape[0]):
         titles = ['optimal solution', 'noisy trajectory']
 
         y_mat_rotated = np.reshape(thetas[:num, :], (num, T, 2))
@@ -1002,30 +1005,34 @@ def rkf_vis(example, cfg):
 
         x_kalman_lah = get_x_kalman_from_x_primal(rkf_lah_vis[index,  :], T)
         x_kalman_l2ws = get_x_kalman_from_x_primal(rkf_l2ws_vis[index,  :], T)
-        # x_kalman_lm = get_x_kalman_from_x_primal(rkf_lah_vis[index,  :], T)
+        x_kalman_lm = get_x_kalman_from_x_primal(rkf_lm_vis[index,  :], T)
         
-        traj.append(x_kalman_l2ws)
         traj.append(x_kalman_lah)
-        # traj.append(x_kalman_lm)
+        traj.append(x_kalman_l2ws)
+        traj.append(x_kalman_lm)
         titles.append(f"lah")
         titles.append(f"l2ws")
         titles.append(f"lm")
         plt.clf()
-        plot_positions_overlay(traj, titles, filename=f"positions_{index}.pdf", legend=False)
-        plot_positions_overlay(traj, titles, filename=f"positions_{index}_leg.pdf", legend=True)
+        plot_positions_overlay(traj, titles, filename=f"positions_{ood}_{index}.pdf", legend=False)
+        plot_positions_overlay(traj, titles, filename=f"positions_{ood}_{index}_leg.pdf", legend=True)
         print('y_mat_rotated', y_mat_rotated[index, :].T)
         print('x_true_kalman', x_true_kalman)
         print('x_kalman_lah', x_kalman_lah)
 
 
-def get_rkf_vis_data(example, dt):
+def get_rkf_vis_data(example, dt, ood=False, nn=False):
     orig_cwd = hydra.utils.get_original_cwd()
     dt_path = f"{orig_cwd}/outputs/{example}/train_outputs/{dt}"
 
     # iterate over all of the ones that start with train_epoch
-    directory = f"{dt_path}/visualize_test"
-    # last_folder = find_last_folder_starting_with(directory, 'train_epoch')
-    last_folder = 'no_train'
+    if ood:
+        directory = f"{dt_path}/visualize_val"
+    else:
+        directory = f"{dt_path}/visualize_test"
+    last_folder = find_last_folder_starting_with(directory, 'train_epoch')
+    if nn:
+        last_folder = 'no_train'
 
     primals_file = f"{directory}/{last_folder}/x_primals.csv"
     x_primals = read_csv(primals_file, header=None, index_col=0)
@@ -1035,7 +1042,7 @@ def get_rkf_vis_data(example, dt):
 
     thetas_file = f"{directory}/{last_folder}/thetas.csv"
     thetas = read_csv(thetas_file, header=None, index_col=0)
-    return x_primals.to_numpy(), x_stars.to_numpy(), thetas.to_numpy() #[1:, :]
+    return x_primals.to_numpy()[1:,:], x_stars.to_numpy()[1:,:], thetas.to_numpy()[1:,:] #[1:, :]
     
 
 def get_eval_array(df, title):

@@ -149,6 +149,7 @@ def fp_eval_lah_ista_safeguard(i, val, supervised, z_star, lambd, A, safeguard_s
     # step_size = lax.cond(next_safeguard, lambda _: safeguard_step, lambda _: ista_steps[i], operand=None)
 
     # z_next = fixed_point_ista(z, A, c, lambd, step_size) #ista_steps[i])
+
     z_next = fixed_point_ista(z, A, c, lambd, ista_steps[i])
     diff = jnp.linalg.norm(z - z_star)
     
@@ -158,8 +159,8 @@ def fp_eval_lah_ista_safeguard(i, val, supervised, z_star, lambd, A, safeguard_s
     next_obj = .5 * jnp.linalg.norm(A @ z_next - c) ** 2 + lambd * jnp.linalg.norm(z_next, ord=1)
 
 
-
-    next_safeguard = lax.cond(next_obj - opt_obj > 20 * (obj - opt_obj), lambda _: True, lambda _: safeguard, operand=None)
+    # next_safeguard = lax.cond(next_obj - opt_obj < 0, lambda _: True, lambda _: safeguard, operand=None)
+    next_safeguard = lax.cond(next_obj - opt_obj > 1 * (obj - opt_obj), lambda _: True, lambda _: safeguard, operand=None)
     z_next_final = lax.cond(next_safeguard, lambda _: fixed_point_ista(z, A, c, lambd, safeguard_step), lambda _: z_next, operand=None)
 
     # next_obj = next_obj #* (iter % 10 == 0)
@@ -181,6 +182,7 @@ def fp_eval_lah_ista_safeguard(i, val, supervised, z_star, lambd, A, safeguard_s
     z_all = z_all.at[i, :].set(z_next_final)
 
     next_safeguard = safeguard
+    
 
     return z_next_final, loss_vec, z_all, obj_diffs, next_safeguard
 
@@ -324,7 +326,11 @@ def fp_train_lah_fista(i, val, supervised, z_star, lambd, A, c, ista_steps):
     # diff = jnp.linalg.norm(z_next - z) ** 2
     obj = .5 * jnp.linalg.norm(A @ z - c) ** 2 + lambd * jnp.linalg.norm(z, ord=1)
     opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
-    loss_vec = loss_vec.at[i].set(obj - opt_obj)
+    
+    if supervised:
+        loss_vec = loss_vec.at[i].set(diff)
+    else:
+        loss_vec = loss_vec.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec
 
 

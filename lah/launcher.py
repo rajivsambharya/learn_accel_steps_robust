@@ -146,10 +146,11 @@ class Workspace:
         # load the data from problem to problem
         jnp_load_obj = self.load_setup_data(example, cfg.data.datetime, N_train, N_test, N_val)
         thetas = jnp.array(jnp_load_obj['thetas'])
+        thetas_ood = jnp.array(jnp_load_obj['thetas_ood'])
 
         self.thetas_train = thetas[self.train_indices, :]
         self.thetas_test = thetas[self.test_indices, :]
-        self.thetas_val = thetas[self.val_indices, :]
+        self.thetas_val = thetas_ood[self.val_indices, :]
 
         train_inputs, test_inputs, normalize_col_sums, normalize_std_dev = normalize_inputs_fn(
             self.normalize_inputs, thetas, self.train_indices, self.test_indices)
@@ -416,7 +417,8 @@ class Workspace:
                           c_mat_train=self.q_mat_train,
                           c_mat_test=self.q_mat_test,
                           lambd=lambd,
-                          A=A
+                          A=A,
+                          accel=static_dict['accel']
                           )
         self.l2ws_model = LAHISTAmodel(train_unrolls=self.train_unrolls,
                                        eval_unrolls=self.eval_unrolls,
@@ -818,6 +820,10 @@ class Workspace:
             z_stars = jnp_load_obj['z_stars']
             z_stars_train = z_stars[self.train_indices, :]
             z_stars_test = z_stars[self.test_indices, :]
+
+            if self.val:
+                z_stars = jnp_load_obj['z_stars_ood']
+                self.z_stars_val = z_stars[self.val_indices, :]
             plot_samples(num_plot, self.thetas_train,
                          self.train_inputs, z_stars_train)
             self.z_stars_test = z_stars_test
@@ -900,11 +906,20 @@ class Workspace:
             # self.test_indices = rand_indices[:N_test]
             self.q_mat_test = q_mat[self.test_indices, :] #* 2 #+ .1
 
-            self.val_indices = rand_indices[N_train + N_test:]
-            self.q_mat_val = q_mat[self.val_indices, :]
+            # self.val_indices = rand_indices[N_train + N_test:]
+            # self.q_mat_val = q_mat[self.val_indices, :]
             # import pdb
             # pdb.set_trace()
-            
+            if 'q_mat_ood' in jnp_load_obj.keys():
+                q_mat_ood = jnp.array(jnp_load_obj['q_mat_ood'])
+                self.val = True
+                # self.val_indices = rand_indices[N_train + N_test:]
+                val_rand_indices = np.random.choice(q_mat_ood.shape[0], N_val, replace=False)
+                self.val_indices = val_rand_indices[:N_val]
+                self.q_mat_val = q_mat_ood[self.val_indices, :]
+            else:
+                self.val = False
+
         else:
             thetas = jnp.array(jnp_load_obj['thetas'])
             rand_indices = np.arange(N)
@@ -970,18 +985,19 @@ class Workspace:
         self.pep_filename = 'pep_results.csv'
 
     def evaluate_iters(self, num, col, train=False, plot=True, plot_pretrain=False):
-        if train and col == 'prev_sol':
+        if train == 'train' and col == 'prev_sol':
             return
         fixed_ws = col == 'nesterov' #col == 'nearest_neighbor' or col == 'prev_sol' or col == 'nesterov'
         if col == 'nearest_neighbor' and not self.l2ws_model.lah:
             fixed_ws = True
 
         # do the actual evaluation (most important step in thie method)
-        eval_batch_size = self.eval_batch_size_train if train else self.eval_batch_size_test
+        eval_batch_size = self.eval_batch_size_train if train == 'train' else self.eval_batch_size_test
 
-        val = col == 'final'
+        # val = col == 'final'
+        
         eval_out = self.evaluate_only(
-            fixed_ws, num, train, col, eval_batch_size, val=val)
+            fixed_ws, num, train, col, eval_batch_size) #, val=val)
 
         # extract information from the evaluation
         loss_train, out_train, train_time = eval_out
@@ -1071,17 +1087,30 @@ class Workspace:
             plot_lah_weights(transformed_params, col)
 
         # custom visualize
-        z_stars = self.z_stars_train if train else self.z_stars_test
-        thetas = self.thetas_train if train else self.thetas_test
-        if not hasattr(self, 'z_no_learn_train') and train:
+        # z_stars = self.z_stars_train if train == 'train' else self.z_stars_test
+        # thetas = self.thetas_train if train == 'train' else self.thetas_test
+
+        if not hasattr(self, 'z_no_learn_train') and train == 'train':
             self.z_no_learn_train = z_plot
-        elif not hasattr(self, 'z_no_learn_test') and not train:
+        elif not hasattr(self, 'z_no_learn_test') and train == 'test':
             self.z_no_learn_test = z_plot
-        z_no_learn = self.z_no_learn_train if train else self.z_no_learn_test
+        elif not hasattr(self, 'z_no_learn_val') and train == 'val':
+            self.z_no_learn_val = z_plot
+        if train == 'train':
+            z_stars = self.z_stars_train
+            thetas = self.thetas_train
+            z_no_learn = self.z_no_learn_train
+        elif train == 'test':
+            z_stars = self.z_stars_test
+            thetas = self.thetas_test
+            z_no_learn = self.z_no_learn_test
+        elif train == 'val':
+            z_stars = self.z_stars_val
+            thetas = self.thetas_val
+            z_no_learn = self.z_no_learn_val
+        # z_no_learn = self.z_no_learn_train if train else self.z_no_learn_test
         z_nn = z_no_learn
         z_prev_sol = z_no_learn
-        # import pdb
-        # pdb.set_trace()
         if self.has_custom_visualization:
             if self.vis_num > 0:
                 # custom_visualize(z_plot, train, col)
@@ -1394,29 +1423,32 @@ class Workspace:
 
 
     def eval_iters_train_and_test(self, col, new_start_index):
-        # try:
-        #     # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
-        #     pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:40,:])))
-        #     print('PEPLOSS', pep_loss)
+        try:
+            pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+            # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:40,:])))
+            print('PEPLOSS', pep_loss)
             
-        #     # now save the result
-        #     try:
-        #         pep_df = pd.read_csv(self.pep_filename)
-        #     except FileNotFoundError:
-        #         pep_df = pd.DataFrame(columns=['col', 'pep_val'])
-        #     write_pep(pep_df, self.pep_filename, col, pep_loss)
-        # except Exception as e:
-        #     print('exception', e)
-        #     try:
-        #         pep_df = pd.read_csv(self.pep_filename)
-        #     except FileNotFoundError:
-        #         pep_df = pd.DataFrame(columns=['col', 'pep_val'])
-        #     write_pep(pep_df, self.pep_filename, col, 99999)
+            # now save the result
+            try:
+                pep_df = pd.read_csv(self.pep_filename)
+            except FileNotFoundError:
+                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
+            write_pep(pep_df, self.pep_filename, col, pep_loss)
+        except Exception as e:
+            print('exception', e)
+            try:
+                pep_df = pd.read_csv(self.pep_filename)
+            except FileNotFoundError:
+                pep_df = pd.DataFrame(columns=['col', 'pep_val'])
+            write_pep(pep_df, self.pep_filename, col, 99999)
         
         self.evaluate_iters(
-            self.num_samples_test, col, train=False)
+            self.num_samples_test, col, train='test')
+        if self.val:
+            self.evaluate_iters(
+                self.num_samples_test, col, train='val')
         out_train = self.evaluate_iters(
-            self.num_samples_train, col, train=True)
+            self.num_samples_train, col, train='train')
         
         # update self.l2ws_model.train_inputs
         print('new_start_index', new_start_index)
@@ -1450,13 +1482,17 @@ class Workspace:
         tag = 'train' if train else 'test'
         factors = None
 
-        if train:
-            z_stars = self.l2ws_model.z_stars_train[:num, :]
-        else:
-            if val:
-                z_stars = self.z_stars_val
-            else:
-                z_stars = self.l2ws_model.z_stars_test[:num, :]
+        if train == 'train':
+            z_stars = self.z_stars_train[:num, :]
+        elif train == 'test':
+            z_stars = self.z_stars_test[:num, :]
+        elif train == 'val':
+            z_stars = self.z_stars_val[:num, :]
+        # else:
+        #     if val:
+        #         z_stars = self.z_stars_val
+        #     else:
+        #         z_stars = self.l2ws_model.z_stars_test[:num, :]
         if col == 'prev_sol':
             if train:
                 q_mat_full = self.l2ws_model.q_mat_train[:num, :]
@@ -1466,10 +1502,16 @@ class Workspace:
             q_mat = q_mat_full[non_first_indices, :]
             z_stars = z_stars[non_first_indices, :]
         else:
-            q_mat = self.l2ws_model.q_mat_train[:num,
-                                                :] if train else self.l2ws_model.q_mat_test[:num, :]
-            if val:
-                q_mat = self.q_mat_val
+            # q_mat = self.l2ws_model.q_mat_train[:num,
+            #                                     :] if train else self.l2ws_model.q_mat_test[:num, :]
+            if train == 'train':
+                q_mat = self.q_mat_train[:num, :]
+            elif train == 'test':
+                q_mat = self.q_mat_test[:num, :]
+            elif train == 'val':
+                q_mat = self.q_mat_val[:num, :]
+            # if val:
+            #     q_mat = self.q_mat_val
 
         z0_inits = self.get_inputs_for_eval(fixed_ws, num, train, col)
 
@@ -1477,9 +1519,8 @@ class Workspace:
         num_batches = int(num / batch_size)
         full_eval_out = []
         key = 64 if col == 'silver' else 1 + self.l2ws_model.step_varying_num
-        if num_batches <= 1:
-            
 
+        if num_batches <= 1:
             eval_out = self.l2ws_model.evaluate(
                 self.eval_unrolls, z0_inits, q_mat, z_stars, fixed_ws, key, factors=factors, tag=col)
             return eval_out
@@ -1531,9 +1572,15 @@ class Workspace:
                 m, n = self.l2ws_model.m, self.l2ws_model.n
             else:
                 m, n = 0, 0
+            if train == 'test':
+                points = self.thetas_test
+            elif train == 'val':
+                points = self.thetas_val
+            elif train == 'train':
+                points = self.thetas_train
             inputs = get_nearest_neighbors(is_osqp, 
                                            self.thetas_train,
-                                           self.thetas_test,
+                                           points,
                                             self.l2ws_model.z_stars_train,
                                             train, num, m=m, n=n)
 
@@ -1547,15 +1594,19 @@ class Workspace:
             if self.l2ws_model.lah:
                 if isinstance(self.l2ws_model, LAHOSQPmodel):
                     m, n = self.l2ws_model.m, self.l2ws_model.n
-                    if train:
+                    if train == 'train':
                         inputs = self.l2ws_model.z_stars_train[:num, :m + n] * 0
-                    else:
+                    elif train == 'test':
                         inputs = self.l2ws_model.z_stars_test[:num, :m + n] * 0
+                    elif train == 'val':
+                        inputs = self.l2ws_model.z_stars_val[:num, :m + n] * 0
                 else:
-                    if train:
-                        inputs = self.l2ws_model.z_stars_train[:num, :] * 0
-                    else:
-                        inputs = self.l2ws_model.z_stars_test[:num, :] * 0
+                    if train == 'train':
+                        inputs = self.z_stars_train[:num, :] * 0
+                    elif train == 'test':
+                        inputs = self.z_stars_test[:num, :] * 0
+                    elif train == 'val':
+                        inputs = self.z_stars_val[:num, :] * 0
             else:
                 if train:
                     inputs = self.l2ws_model.train_inputs[:num, :]
@@ -1569,22 +1620,30 @@ class Workspace:
     def setup_dataframes(self):
         self.iters_df_train = create_empty_df(self.eval_unrolls)
         self.iters_df_test = create_empty_df(self.eval_unrolls)
+        self.iters_df_val = create_empty_df(self.eval_unrolls)
 
         # primal and dual residuals
         self.primal_residuals_df_train = create_empty_df(self.eval_unrolls)
-        self.dual_residuals_df_train = create_empty_df(self.eval_unrolls)
         self.primal_residuals_df_test = create_empty_df(self.eval_unrolls)
+        self.primal_residuals_df_val = create_empty_df(self.eval_unrolls)
+
+        self.dual_residuals_df_train = create_empty_df(self.eval_unrolls)
+        self.dual_residuals_df_val = create_empty_df(self.eval_unrolls)
         self.dual_residuals_df_test = create_empty_df(self.eval_unrolls)
+        
         self.pr_dr_max_df_train = create_empty_df(self.eval_unrolls)
         self.pr_dr_max_df_test = create_empty_df(self.eval_unrolls)
+        self.pr_dr_max_df_val = create_empty_df(self.eval_unrolls)
 
         # obj_vals_diff
         self.obj_vals_diff_df_train = create_empty_df(self.eval_unrolls)
         self.obj_vals_diff_df_test = create_empty_df(self.eval_unrolls)
+        self.obj_vals_diff_df_val = create_empty_df(self.eval_unrolls)
 
         # dist_opts
         self.dist_opts_df_train = create_empty_df(self.eval_unrolls)
         self.dist_opts_df_test = create_empty_df(self.eval_unrolls)
+        self.dist_opts_df_val = create_empty_df(self.eval_unrolls)
 
         self.frac_solved_df_list_train, self.frac_solved_df_list_test = [], []
         for i in range(len(self.frac_solved_accs)):
@@ -1613,7 +1672,7 @@ class Workspace:
         primal_residuals_df, dual_residuals_df, pr_dr_df = None, None, None
         obj_vals_diff_df = None
         dist_opts_df = None
-        if train:
+        if train == 'train':
             self.iters_df_train[col] = iter_losses_mean
             self.iters_df_train.to_csv('iters_compared_train.csv')
             if primal_residuals is not None:
@@ -1636,8 +1695,7 @@ class Workspace:
                 self.dist_opts_df_train.to_csv('dist_opts_df_train.csv')
                 dist_opts_df = self.dist_opts_df_train
             iters_df = self.iters_df_train
-
-        else:
+        elif train == 'test':
             self.iters_df_test[col] = iter_losses_mean
             self.iters_df_test.to_csv('iters_compared_test.csv')
             if primal_residuals is not None:
@@ -1659,7 +1717,33 @@ class Workspace:
                 self.dist_opts_df_test[col] = dist_opts
                 self.dist_opts_df_test.to_csv('dist_opts_df_test.csv')
                 dist_opts_df = self.dist_opts_df_test
+            
 
             iters_df = self.iters_df_test
+        elif train == 'val':
+            self.iters_df_val[col] = iter_losses_mean
+            self.iters_df_val.to_csv('iters_compared_val.csv')
+            if primal_residuals is not None:
+                self.primal_residuals_df_val[col] = primal_residuals
+                self.primal_residuals_df_val.to_csv('primal_residuals_val.csv')
+                self.dual_residuals_df_val[col] = dual_residuals
+                self.dual_residuals_df_val.to_csv('dual_residuals_val.csv')
+                self.pr_dr_max_df_val[col] = jnp.maximum(primal_residuals, dual_residuals)
+                self.pr_dr_max_df_val.to_csv('pr_dr_max_val.csv')
+
+                primal_residuals_df = self.primal_residuals_df_val
+                dual_residuals_df = self.dual_residuals_df_val
+                pr_dr_df = self.pr_dr_max_df_val
+            if obj_vals_diff is not None:
+                self.obj_vals_diff_df_val[col] = obj_vals_diff
+                self.obj_vals_diff_df_val.to_csv('obj_vals_diff_val.csv')
+                obj_vals_diff_df = self.obj_vals_diff_df_val
+            if dist_opts is not None:
+                self.dist_opts_df_val[col] = dist_opts
+                self.dist_opts_df_val.to_csv('dist_opts_df_val.csv')
+                dist_opts_df = self.dist_opts_df_val
+            
+
+            iters_df = self.iters_df_val
 
         return iters_df, primal_residuals_df, dual_residuals_df, obj_vals_diff_df, dist_opts_df, pr_dr_df

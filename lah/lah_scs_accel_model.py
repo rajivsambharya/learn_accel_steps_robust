@@ -123,6 +123,7 @@ class LAHAccelSCSmodel(L2Omodel):
             self.z_stars_train, self.z_stars_test = None, None
         self.lah_train_inputs = jnp.hstack([0 * self.z_stars_train, jnp.ones((self.z_stars_train.shape[0], 1))])
 
+
     def create_end2end_loss_fn(self, bypass_nn, diff_required):
         supervised = self.supervised and diff_required
         loss_method = self.loss_method

@@ -60,10 +60,18 @@ class LAHISTAmodel(L2Omodel):
         #                                 jit=self.jit)
         # self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
         #                                jit=self.jit)
-        self.k_steps_train_fn = partial(k_steps_train_lah_fista, lambd=lambd, A=A,
+        self.accel = input_dict['accel']
+        self.supervised = not self.accel
+        if self.accel:
+            self.k_steps_train_fn = partial(k_steps_train_lah_fista, lambd=lambd, A=A,
+                                            jit=self.jit)
+            self.k_steps_eval_fn = partial(k_steps_eval_lah_fista, lambd=lambd, A=A,
                                         jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_lah_fista, lambd=lambd, A=A,
-                                       jit=self.jit)
+        else:
+            self.k_steps_train_fn = partial(k_steps_train_lah_ista, lambd=lambd, A=A,
+                                            jit=self.jit)
+            self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
+                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_lasso_backtracking, lambd=lambd, eta0=1.0, A=A,
                                        jit=self.jit)
 
@@ -79,8 +87,8 @@ class LAHISTAmodel(L2Omodel):
         self.num_pep_iters = self.train_unrolls
 
         # e2e_loss_fn = self.create_end2end_loss_fn
-        # self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
-
+        self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        
 
 
     def f(self, z, c):
@@ -518,7 +526,7 @@ class LAHISTAmodel(L2Omodel):
 
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required, special_algo='gd'):
-        supervised = True  # self.supervised and diff_required
+        supervised = self.supervised  # self.supervised and diff_required
         loss_method = self.loss_method
 
         @partial(jit, static_argnames=['iters', 'key'])
@@ -549,7 +557,10 @@ class LAHISTAmodel(L2Omodel):
                     # stochastic_params = jnp.zeros((n_iters, 1))
                     # stochastic_params = stochastic_params.at[:n_iters - 1, 0].set(jnp.exp(params[0][:n_iters - 1, 0]))
                     # stochastic_params = stochastic_params.at[n_iters - 1, 0].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, 0]))
-                    stochastic_params = self.transform_params(params, n_iters)
+                    # stochastic_params = self.transform_params(params, n_iters)
+                    stochastic_params = jnp.exp(params[0])
+            if not self.accel:
+                stochastic_params = stochastic_params.at[:,1].set(0)
 
             # stochastic_params = jnp.clip(stochastic_params, a_max=0.3)
             if self.train_fn is not None:
@@ -584,19 +595,32 @@ class LAHISTAmodel(L2Omodel):
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
                 angles = None
             else:
-                if diff_required:
-                    z_final, iter_losses = train_fn(k=iters,
-                                                    z0=z0,
-                                                    y0=z0,
-                                                    q=q,
-                                                    params=stochastic_params,
-                                                    supervised=supervised,
-                                                    z_star=z_star)
+                if self.accel:
+                    params = stochastic_params
                 else:
+                    params = stochastic_params[:,:1]
+                if diff_required:
+                    if self.accel:
+                        z_final, iter_losses = train_fn(k=iters,
+                                                        z0=z0,
+                                                        y0=z0,
+                                                        q=q,
+                                                        params=params,
+                                                        supervised=supervised,
+                                                        z_star=z_star)
+                    else:
+                        z_final, iter_losses = train_fn(k=iters,
+                                                        z0=z0,
+                                                        q=q,
+                                                        params=params,
+                                                        supervised=supervised,
+                                                        z_star=z_star)
+                else:
+                    
                     eval_out = eval_fn(k=iters,
                                        z0=z0,
                                        q=q,
-                                       params=stochastic_params,
+                                       params=params,
                                        supervised=supervised,
                                        z_star=z_star)
                     z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]

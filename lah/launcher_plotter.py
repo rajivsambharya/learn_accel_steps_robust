@@ -92,12 +92,15 @@ def plot_eval_iters_df(df, train, col, ylabel, filename,
     plt.xlabel(xlabel)
     plt.ylabel(f"test {ylabel}")
     plt.legend()
-    if train:
+    if train == 'train':
         plt.title('train problems')
         plt.savefig(f"{filename}_train.pdf", bbox_inches='tight')
-    else:
+    elif train == 'test':
         plt.title('test problems')
         plt.savefig(f"{filename}_test.pdf", bbox_inches='tight')
+    elif train == 'val':
+        plt.title('val problems')
+        plt.savefig(f"{filename}_val.pdf", bbox_inches='tight')
     plt.clf()
 
 
@@ -130,10 +133,12 @@ def plot_losses_over_examples(losses_over_examples, train, col, yscalelog=True):
         """
         plots the fixed point residuals over eval steps for each individual problem
         """
-        if train:
+        if train == 'train':
             loe_folder = 'losses_over_examples_train'
-        else:
+        elif train == 'test':
             loe_folder = 'losses_over_examples_test'
+        elif train == 'val':
+            loe_folder = 'losses_over_examples_val'
         if not os.path.exists(loe_folder):
             os.mkdir(loe_folder)
 
@@ -225,7 +230,13 @@ def custom_visualize(custom_visualize_fn, iterates_visualize, vis_num, thetas, z
     """
     x_primals has shape [N, eval_iters]
     """
-    visualize_path = 'visualize_train' if train else 'visualize_test'
+    # visualize_path = 'visualize_train' if train else 'visualize_test'
+    if train == 'train':
+        visualize_path = 'visualize_train'
+    elif train == 'test':
+        visualize_path = 'visualize_test'
+    elif train == 'val':
+        visualize_path = 'visualize_val'
 
     if not os.path.exists(visualize_path):
         os.mkdir(visualize_path)
@@ -270,11 +281,30 @@ def custom_visualize(custom_visualize_fn, iterates_visualize, vis_num, thetas, z
     # else:
     #     z_no_learn = z_no_learn_test
 
-    if train:
+    if train == 'train':
         if col != 'nearest_neighbor' and col != 'no_train' and col != 'prev_sol':
             custom_visualize_fn(z_all, z_stars, z_no_learn, z_nn,
                                         thetas, iterates_visualize, visual_path)
-    else:
+    elif train == 'val':
+        if col != 'nearest_neighbor' and col != 'no_train': # and col != 'prev_sol':
+            if z_prev_sol is None:
+                custom_visualize_fn(z_all, z_stars, z_no_learn, z_nn,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)
+            else:
+                custom_visualize_fn(z_all, z_stars, z_prev_sol, z_nn,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)
+        else:
+            if z_prev_sol is None:
+                custom_visualize_fn(z_all, z_stars, z_all, z_all,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)
+            else:
+                custom_visualize_fn(z_all, z_stars, z_all, z_all,
+                                            thetas, iterates_visualize, visual_path,
+                                            num=vis_num)     
+    elif train == 'test':
         if col != 'nearest_neighbor' and col != 'no_train': # and col != 'prev_sol':
             if z_prev_sol is None:
                 custom_visualize_fn(z_all, z_stars, z_no_learn, z_nn,

@@ -280,7 +280,7 @@ def osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None):
     plt.clf()
 
 
-def ista_setup_script(b_mat, A, lambd, output_filename, box=None):
+def ista_setup_script(b_mat, A, lambd, output_filename, ood_num, box=None):
     # def solve_many_probs_cvxpy(A, b_mat, lambd):
     """
     solves many lasso problems where each problem has a different b vector
@@ -308,12 +308,23 @@ def ista_setup_script(b_mat, A, lambd, output_filename, box=None):
     # save the data
     log.info("final saving final data...")
     t0 = time.time()
-    jnp.savez(
+    if ood_num == 0:
+        jnp.savez(
         output_filename,
         thetas=jnp.array(b_mat),
         q_mat=jnp.array(b_mat),
         z_stars=z_stars,
     )
+    else:
+        jnp.savez(
+            output_filename,
+            thetas=jnp.array(b_mat[ood_num:,:]),
+            q_mat=jnp.array(b_mat[ood_num:,:]),
+            z_stars=z_stars[ood_num:,:],
+            thetas_ood=jnp.array(b_mat[:ood_num,:]),
+            q_mat_ood=jnp.array(b_mat[:ood_num,:]),
+            z_stars_ood=z_stars[:ood_num,:],
+        )
 
     # save solve times
     df_solve_times = pd.DataFrame(solve_times, columns=['solve_times'])
@@ -371,7 +382,7 @@ def gd_setup_script(c_mat, P, theta_mat, output_filename):
     plt.clf()
 
 
-def setup_script(q_mat, theta_mat, solver, data, cones_dict, output_filename, solve=True, save=True):
+def setup_script(q_mat, theta_mat, solver, data, cones_dict, output_filename, ood_num=0, solve=True, save=True):
     N = q_mat.shape[0]
     m, n = data['A'].shape
 
@@ -379,8 +390,6 @@ def setup_script(q_mat, theta_mat, solver, data, cones_dict, output_filename, so
     x_stars = jnp.zeros((N, n))
     y_stars = jnp.zeros((N, m))
     s_stars = jnp.zeros((N, m))
-    # q_mat = jnp.zeros((N, m + n))
-    # scs_instances = []
 
     P_sparse, A_sparse = data['P'], data['A']
     if solve:
@@ -424,14 +433,30 @@ def setup_script(q_mat, theta_mat, solver, data, cones_dict, output_filename, so
         # save the data
         log.info("final saving final data...")
         t0 = time.time()
-        jnp.savez(
-            output_filename,
-            thetas=theta_mat,
-            x_stars=x_stars,
-            y_stars=y_stars,
-            s_stars=s_stars,
-            q_mat=q_mat
-        )
+        if ood_num == 0:
+            jnp.savez(
+                output_filename,
+                thetas=theta_mat,
+                x_stars=x_stars,
+                y_stars=y_stars,
+                s_stars=s_stars,
+                q_mat=q_mat
+            )
+        else:
+            num_in_distribution = x_stars.shape[0] - ood_num
+            jnp.savez(
+                output_filename,
+                thetas=theta_mat[:num_in_distribution,:],
+                x_stars=x_stars[:num_in_distribution,:],
+                y_stars=y_stars[:num_in_distribution,:],
+                s_stars=s_stars[:num_in_distribution,:],
+                q_mat=q_mat[:num_in_distribution,:],
+                thetas_ood=theta_mat[num_in_distribution:,:],
+                x_stars_ood=x_stars[num_in_distribution:,:],
+                y_stars_ood=y_stars[num_in_distribution:,:],
+                s_stars_ood=s_stars[num_in_distribution:,:],
+                q_mat_ood=q_mat[num_in_distribution:,:]
+            )
 
         # save solve times
         df_solve_times = pd.DataFrame(solve_times, columns=['solve_times'])

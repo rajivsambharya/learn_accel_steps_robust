@@ -12,3 +12,5 @@ p: 0.1
 w_noise_var: 0.1
 y_noise_var: 0.1
 B_const: 1
+ood_x_shift: 100
+ood_num_rollouts: 2
