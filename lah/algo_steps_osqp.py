@@ -316,8 +316,10 @@ def k_steps_eval_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_sta
     w = A @ z0[:n]
     z_init = z_init.at[m + n:].set(w)
 
-    scalar_params, all_factors = params[0], params[1]
-    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), scalar_params[:, 2]
+    scalar_params, all_factors, rho_vec = params[0], params[1], params[2]
+    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), jnp.exp(scalar_params[:, 2])
+    betas = jnp.exp(scalar_params[:, 3])
+    rho_vecs = rho_vec
 
     z_all_plus_1 = jnp.zeros((k + 1, z_init.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z_init)
@@ -329,25 +331,26 @@ def k_steps_eval_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_sta
                               A=A,
                               idx_mapping=idx_mapping,
                               q=q,
-                              rhos=rhos,
+                              rhos=rho_vecs, #rhos,
                               sigmas=sigmas,
                               alphas=alphas,
+                              betas=betas,
                               custom_loss=custom_loss
                               )
     z_all = jnp.zeros((k, z_init.size))
     primal_resids, dual_resids = jnp.zeros(k), jnp.zeros(k)
-    val = z_init, iter_losses, z_all, primal_resids, dual_resids
+    val = z_init, z_init, iter_losses, z_all, primal_resids, dual_resids
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_eval_partial, val)
-    z_final, iter_losses, z_all, primal_resids, dual_resids = out
+    z_final, y_final, iter_losses, z_all, primal_resids, dual_resids = out
     z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
     return z_final, iter_losses, z_all_plus_1, primal_resids, dual_resids
 
 
-def k_steps_train_lah_osqp(k, z0, q, params, A, idx_mapping, supervised, z_star, jit):
+def k_steps_train_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
     m, n = A.shape
 
@@ -357,53 +360,65 @@ def k_steps_train_lah_osqp(k, z0, q, params, A, idx_mapping, supervised, z_star,
     w = A @ z0[:n]
     z_init = z_init.at[m + n:].set(w)
 
-    scalar_params, all_factors = params[0], params[1]
-    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), scalar_params[:, 2]
+    scalar_params, all_factors, rho_vec = params[0], params[1], params[2]
+    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), jnp.exp(scalar_params[:, 2])
+    betas = jnp.exp(scalar_params[:, 3])
+    rho_vecs = rho_vec
     
     fp_train_partial = partial(fp_train_lah_osqp,
                                supervised=supervised,
                                z_star=z_star,
                                all_factors=all_factors,
+                               P=P,
                                A=A,
                                idx_mapping=idx_mapping,
                                q=q,
-                               rhos=rhos,
+                               rhos=rho_vecs, #rhos,
                                sigmas=sigmas,
-                               alphas=alphas
+                               alphas=alphas,
+                               betas=betas
                                )
-    val = z_init, iter_losses
+    val = z_init, z_init, iter_losses
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_train_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_train_partial, val)
-    z_final, iter_losses = out
+    z_final, y_final, iter_losses = out
     return z_final, iter_losses
 
 
-def fp_train_lah_osqp(i, val, supervised, z_star, all_factors, A, idx_mapping, q, rhos, sigmas, alphas):
-    z, loss_vec = val
+def fp_train_lah_osqp(i, val, supervised, z_star, all_factors, P, A, idx_mapping, q, rhos, sigmas, alphas, betas):
+    m, n = A.shape
+    z, y, loss_vec = val
 
     factors1, factors2 = all_factors
     idx = 0 #idx_mapping[i]
-    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx], alphas[i])
+    y_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos, sigmas[idx], alphas[i])
+    z_next = y_next + betas[i] * (y_next - y)
+    
     if supervised:
         diff = jnp.linalg.norm(z_next - z_star)
     else:
-        diff = jnp.linalg.norm(z_next - z)
+        pr = jnp.linalg.norm(A @ z[:n] - z[n + m:])
+        dr = jnp.linalg.norm(P @ z[:n] + A.T @ z[n:n + m] + q[:n])
+        # diff = jnp.linalg.norm(z_next - z)
+        diff = pr + dr
     loss_vec = loss_vec.at[i].set(diff)
-    return z_next, loss_vec
+    return z_next, y_next, loss_vec
 
 
-def fp_eval_lah_osqp(i, val, supervised, z_star, all_factors, P, A, idx_mapping, q, rhos, sigmas, alphas,
+def fp_eval_lah_osqp(i, val, supervised, z_star, all_factors, P, A, idx_mapping, q, rhos, sigmas, alphas, betas,
                        custom_loss=None, lightweight=False):
     m, n = A.shape
-    z, loss_vec, z_all, primal_residuals, dual_residuals = val
+    z, y, loss_vec, z_all, primal_residuals, dual_residuals = val
     idx = 0 #idx_mapping[i]
 
     factors1, factors2 = all_factors
     
-    z_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos[idx], sigmas[idx], alphas[i])
+    y_next = fixed_point_osqp(z, factors1[idx, :, :], factors2[idx, :], A, q, rhos, sigmas[idx], alphas[i])
+
+    z_next = y_next + betas[i] * (y_next - y)
     if custom_loss is None:
         if supervised:
             diff = jnp.linalg.norm(z - z_star)
@@ -422,5 +437,5 @@ def fp_eval_lah_osqp(i, val, supervised, z_star, all_factors, P, A, idx_mapping,
         # dr = jnp.linalg.norm(P @ z_next[:n] + A.T @ z_next[n:n + m] + q[:n])
         primal_residuals = primal_residuals.at[i].set(pr)
         dual_residuals = dual_residuals.at[i].set(dr)
-    return z_next, loss_vec, z_all, primal_residuals, dual_residuals
+    return z_next, y_next, loss_vec, z_all, primal_residuals, dual_residuals
 

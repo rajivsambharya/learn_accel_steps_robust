@@ -49,6 +49,10 @@ class LAHAccelOSQPmodel(L2Omodel):
                                         jit=self.jit, 
                                         custom_loss=custom_loss)
         self.lah = True
+        m, n = self.m, self.n
+        l0 = self.q_mat_train[0, n: n + m]
+        u0 = self.q_mat_train[0, n + m: n + 2 * m]
+        self.eq_ind = l0 == u0
         # if self.factor_static_bool:
         #     self.A = input_dict['A']
         #     self.P = input_dict['P']
@@ -82,10 +86,17 @@ class LAHAccelOSQPmodel(L2Omodel):
 
     def init_params(self):
         # init step-varying params
-        step_varying_params = jnp.ones((self.step_varying_num, 4))
+        step_varying_params = jnp.zeros((self.step_varying_num, 5))
+        # step_varying_params = step_varying_params.at[:,1].set(-2)
+        step_varying_params = step_varying_params.at[:,3].set(-2)
+        step_varying_params = step_varying_params.at[:,4].set(5)
+        # step_varying_params = step_varying_params.at[:,0].set(-8)
 
         # init steady_state_params
-        steady_state_params = jnp.ones((1, 4))
+        steady_state_params = jnp.zeros((1, 5))
+        steady_state_params = steady_state_params.at[:,3].set(-10)
+        steady_state_params = steady_state_params.at[:,4].set(5)
+        # steady_state_params = steady_state_params.at[:,1].set(-2)
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         # self.mean_params = jnp.ones((self.train_unrolls, 3))
@@ -99,7 +110,7 @@ class LAHAccelOSQPmodel(L2Omodel):
 
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required):
-        supervised = self.supervised and diff_required
+        supervised = False # self.supervised and diff_required
         loss_method = self.loss_method
 
         def predict(params, input, q, iters, z_star, key, factor):
@@ -130,18 +141,24 @@ class LAHAccelOSQPmodel(L2Omodel):
             # do all of the factorizations
             factors1 = jnp.zeros((n_iters, self.n, self.n))
             factors2 = jnp.zeros((n_iters, self.n), dtype=jnp.int32)
-            rhos, sigmas = params[0][:, 0], params[0][:, 1]
-            for i in range(n_iters):
-                rho, sigma = jnp.exp(rhos[0]), jnp.exp(sigmas[0])
-                rho_vec = rho * jnp.ones(self.m)
-                M = P + sigma * jnp.eye(self.n) + A.T @ jnp.diag(rho_vec) @ A
-                factor = jsp.linalg.lu_factor(M)
-                
-                factors1 = factors1.at[i, :, :].set(factor[0])
-                factors2 = factors2.at[i, :].set(factor[1])
+            rhos, sigmas, rho_eqs = params[0][:, 0], params[0][:, 1], params[0][:, 4]
+            rho, sigma, rho_eq = jnp.exp(rhos[0]), jnp.exp(sigmas[0]), jnp.exp(rho_eqs[0])
+            rho_vec = rho * jnp.ones(self.m)
+            
+            rho_vec = rho_vec.at[self.eq_ind].set(rho_eq)
+            M = P + sigma * jnp.eye(self.n) + A.T @ jnp.diag(rho_vec) @ A
+            factor = jsp.linalg.lu_factor(M)
+            # for i in range(n_iters):
+            #     factors1 = factors1.at[i, :, :].set(factor[0])
+            #     factors2 = factors2.at[i, :].set(factor[1])
+            factors1 = factors1.at[0, :, :].set(factor[0])
+            factors2 = factors2.at[0, :].set(factor[1])
                 
             all_factors = factors1, factors2
-            osqp_params = (params[0], all_factors)
+            params[0] = params[0].at[-1,3].set(-10)
+            params[0] = params[0].at[-1,2].set(0)
+            
+            osqp_params = (params[0], all_factors, rho_vec)
 
 
             if diff_required:
@@ -149,6 +166,7 @@ class LAHAccelOSQPmodel(L2Omodel):
                                                 z0=z0,
                                                 q=q_bar,
                                                 A=A,
+                                                P=P,
                                                 params=osqp_params,
                                                 supervised=supervised,
                                                 z_star=z_star) #,

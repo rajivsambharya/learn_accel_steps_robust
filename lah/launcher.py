@@ -13,8 +13,9 @@ import jax
 from jax.interpreters import xla
 
 from functools import partial
+import jax.scipy as jsp
 
-from lah.algo_steps import create_projection_fn, get_psd_sizes
+from lah.algo_steps import create_projection_fn, get_psd_sizes, vec_symm
 from lah.lah_box_qp_accel_model import LAHBOXQPAccelmodel
 from lah.gd_model import GDmodel
 from lah.ista_model import ISTAmodel
@@ -61,8 +62,10 @@ from lah.launcher_writer import (
 )
 from lah.osqp_model import OSQPmodel
 from lah.scs_model import SCSmodel
+from scipy.spatial import distance_matrix
 from lah.utils.generic_utils import setup_permutation
 from jax import vmap
+from lah.utils.mpc_utils import closed_loop_rollout
 
 
 class Workspace:
@@ -1042,9 +1045,10 @@ class Workspace:
 
 
         # load the closed_loop_rollout trajectories
-        # if 'ref_traj_tensor' in jnp_load_obj.keys():
-        #     # load all of the goals
-        #     self.closed_loop_rollout_dict['ref_traj_tensor'] = jnp_load_obj['ref_traj_tensor']
+        if 'ref_traj_tensor' in jnp_load_obj.keys():
+            # load all of the goals
+            self.closed_loop_rollout_dict['ref_traj_tensor'] = jnp_load_obj['ref_traj_tensor']
+        
 
         return jnp_load_obj
 
@@ -1222,6 +1226,12 @@ class Workspace:
                 # u_plot = z_plot
                 custom_visualize(self.custom_visualize_fn, self.iterates_visualize, self.vis_num, 
                                  thetas, z_plot, z_stars, z_no_learn, z_nn, z_prev_sol, train, col)
+        # closed loop control rollouts
+        if train == 'test':
+            if self.closed_loop_rollout_dict is not None:
+                self.run_closed_loop_rollouts(col)
+        # import pdb
+        # pdb.set_trace()
 
         if self.save_weights_flag:
             self.save_weights()
@@ -1852,3 +1862,184 @@ class Workspace:
             iters_df = self.iters_df_val
 
         return iters_df, primal_residuals_df, dual_residuals_df, obj_vals_diff_df, dist_opts_df, pr_dr_df
+    
+
+    def run_closed_loop_rollouts(self, col):
+        """
+        implements the closed_loop_rollouts
+
+        qp_solver will depend on the col
+        - if cold-start or trained: run through neural network
+        - if nearest-neighbor, compute nn on-the-fly
+        - if prev-sol, need function to get previous sol
+        """
+        num_rollouts = self.closed_loop_rollout_dict['num_rollouts']
+        rollout_length = self.closed_loop_rollout_dict['rollout_length']
+        dynamics = self.closed_loop_rollout_dict['dynamics']
+        u_init_traj = self.closed_loop_rollout_dict['u_init_traj']
+        system_constants = self.closed_loop_rollout_dict['system_constants']
+        plot_traj = self.closed_loop_rollout_dict.get('plot_traj', None)
+        # ref_traj_dict_lists = self.closed_loop_rollout_dict['ref_traj_dict_lists_test']
+        ref_traj_tensor = self.closed_loop_rollout_dict['ref_traj_tensor']
+        budget = self.closed_loop_rollout_dict['closed_loop_budget']
+        dt, nx = system_constants['dt'], system_constants['nx']
+        cd0, _ = system_constants['cd0'], system_constants['T']
+
+        Q_ref = self.closed_loop_rollout_dict['Q_ref']
+        obstacle_tol = self.closed_loop_rollout_dict['obstacle_tol']
+
+        static_canon_mpc_osqp_partial = self.closed_loop_rollout_dict['static_canon_mpc_osqp_partial']  # noqa
+
+        # setup the qp_solver
+        qp_solver = partial(self.qp_solver, dt=dt, cd0=cd0, nx=nx, method=col,
+                            static_canon_mpc_osqp_partial=static_canon_mpc_osqp_partial)
+
+        ref_traj_tensor.shape[1]
+        N_train = self.thetas_train.shape[0]
+        # num_train_rollouts = int(N_train / (rollout_length - T))
+        num_train_rollouts = int(N_train / (rollout_length))
+
+        # do the closed loop rollouts
+        rollout_results_list = []
+        # for i in range(num_rollouts):
+        for i in range(1):
+            # get x_init_traj
+            thetas_index = i * rollout_length
+            x_init_traj = self.thetas_test[thetas_index, :nx]  # assumes theta = (x0, u0, x_ref)
+            print('x_init_traj', x_init_traj)
+
+            # old
+            # ref_traj_index = num_train_rollouts + i
+            # traj_list = [ref_traj_tensor[ref_traj_index, i, :] for i in range(num_goals)]
+            # ref_traj_dict = dict(case='obstacle_course', traj_list=traj_list, Q=Q_ref, tol=obstacle_tol) # noqa
+            ref_traj_index = num_train_rollouts + i
+            trajectories = ref_traj_tensor[ref_traj_index, :, :]
+            ref_traj_dict = dict(case='loop_path', traj_list=trajectories,
+                                 Q=Q_ref, tol=obstacle_tol)
+
+            # new
+            rollout_results = closed_loop_rollout(qp_solver,
+                                                  rollout_length,
+                                                  x_init_traj,
+                                                  u_init_traj,
+                                                  dynamics,
+                                                  system_constants,
+                                                  ref_traj_dict,
+                                                  budget,
+                                                  noise_list=None)
+            rollout_results_list.append(rollout_results)
+            state_traj_list = rollout_results['state_traj_list']
+
+            # plot and save the rollout results
+            if not os.path.exists('rollouts'):
+                os.mkdir('rollouts')
+            if not os.path.exists(f"rollouts/{col}"):
+                os.mkdir(f"rollouts/{col}")
+            traj_list = ref_traj_dict['traj_list']
+
+            if plot_traj is not None:
+                plot_traj([state_traj_list], goals=traj_list, labels=[
+                          col], filename=f"rollouts/{col}/rollout_{i}", title='flight')
+
+    def qp_solver(self, Ac, Bc, x0, u0, x_dot, ref_traj, budget, prev_sol, dt, cd0, nx, 
+                  static_canon_mpc_osqp_partial, method):
+        """
+        method could be one of the following
+        - cold-start
+        - nearest-neighbor
+        - prev-sol
+        - anything learned
+        """
+        # get the discrete time system Ad, Bd from the continuous time system Ac, Bc
+        Ad = jnp.eye(nx) + Ac * dt
+        Bd = Bc * dt
+        # print('Bd', Bd)
+        # no need to use u0 for the non-learned case
+
+        # get the constants for the discrete system
+        cd = cd0 + (x_dot - Ac @ x0 - Bc @ u0) * dt
+
+        # get (P, A, c, l, u)
+        out_dict = static_canon_mpc_osqp_partial(ref_traj, x0, Ad, Bd, cd=cd, u_prev=u0)
+        P, A, c, l, u = out_dict['P'], out_dict['A'], out_dict['c'], out_dict['l'], out_dict['u']  # noqa
+        m, n = A.shape
+        q = jnp.concatenate([c, l, u])
+        # print('q', q[:30])
+
+        # get factor
+        rho_vec, sigma = jnp.ones(m), 1
+        rho_vec = rho_vec.at[l == u].set(1000)
+        M = P + sigma * jnp.eye(n) + A.T @ jnp.diag(rho_vec) @ A
+        factor = jsp.linalg.lu_factor(M)
+
+        # solve
+        # z0 = prev_sol  # jnp.zeros(m + n)
+        # out = k_steps_eval_osqp(budget, z0, q, factor, P, A, rho=rho_vec,
+        #                         sigma=sigma, supervised=False, z_star=None, jit=True)
+
+        # expand so that vectors become matrices
+        #   i.e. we are only feeding one input into our method, but out method handles batches
+        #   input has shape (d), but inputs has shape (1, d)
+        # factors = (jnp.expand_dims(factor[0], 0), jnp.expand_dims(factor[1], 0))
+
+        q_full = jnp.concatenate([q, vec_symm(P), jnp.reshape(A, (m * n))])
+        q_mat = jnp.expand_dims(q_full, 0)
+        z_stars = None
+
+        # get theta
+        # theta = jnp.concatenate([x0, u0, ref_traj[:3]]) # assumes specific form of theta
+        theta = jnp.concatenate([x0, u0, jnp.ravel(ref_traj[:, :3])])
+        print('theta', theta)
+
+        # need to transform the input
+        if method == 'nearest_neighbor':
+            inputs = self.theta_2_nearest_neighbor(theta)
+            fixed_ws = True
+        elif method == 'prev_sol':
+            # input = self.shifted_sol(prev_sol)
+            prev_sol_mat = jnp.expand_dims(prev_sol, 0)
+            inputs = self.shifted_sol_fn(prev_sol_mat)
+            # inputs = jnp.expand_dims(input, 0)
+            fixed_ws = True
+        else:
+            normalized_input = self.normalize_theta(theta)
+            inputs = jnp.expand_dims(normalized_input, 0)
+            fixed_ws = False
+            print('inputs', inputs)
+            inputs = jnp.zeros((inputs.shape[0], self.l2ws_model.m + self.l2ws_model.n))
+
+        loss, out, time_per_prob = self.l2ws_model.static_eval(budget, inputs, q_mat, z_stars, None, tag='test', fixed_ws=fixed_ws)
+
+        # sol = out[0]
+        sol = out[2][0, -1, :]
+        print('loss', out[1][-1])
+        # plt.plot(out[1])
+        # plt.yscale('log')
+        # plt.show()
+        # plt.clf()
+
+        # z0 = sol[:nx]
+        # w0 = sol[T*nx:T*nx + nu]
+        # z1 = sol[nx:2*nx]
+        # w1 = sol[T*nx + nu:T*nx + 2*nu]
+
+        return sol, P, A, factor, q
+
+    def theta_2_nearest_neighbor(self, theta):
+        """
+        given a new theta returns the closest training problem solution
+        """
+        # first normalize theta
+        test_input = self.normalize_theta(theta)
+
+        # make it a matrix
+        test_inputs = jnp.expand_dims(test_input, 0)
+
+        distances = distance_matrix(
+            np.array(test_inputs),
+            np.array(self.l2ws_model.train_inputs))
+        indices = np.argmin(distances, axis=1)
+        if isinstance(self.l2ws_model, LAHAccelOSQPmodel):
+            return self.l2ws_model.z_stars_train[indices, :self.m + self.n]
+        else:
+            return self.l2ws_model.z_stars_train[indices, :]
