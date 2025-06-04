@@ -87,15 +87,21 @@ class LAHAccelOSQPmodel(L2Omodel):
     def init_params(self):
         # init step-varying params
         step_varying_params = jnp.zeros((self.step_varying_num, 5))
-        # step_varying_params = step_varying_params.at[:,1].set(-2)
-        step_varying_params = step_varying_params.at[:,3].set(-2)
-        step_varying_params = step_varying_params.at[:,4].set(5)
-        # step_varying_params = step_varying_params.at[:,0].set(-8)
+        # step_varying_params = step_varying_params.at[:,1].set(jnp.log(0.1))
+        # step_varying_params = step_varying_params.at[:,2].set(jnp.log(1.6))
+        step_varying_params = step_varying_params.at[:,3].set(-20)
+        # step_varying_params = step_varying_params.at[:,4].set(0)
+        # step_varying_params = step_varying_params.at[:,4].set(jnp.log(100))
+        # step_varying_params = step_varying_params.at[:,0].set(jnp.log(1e-6))
 
         # init steady_state_params
         steady_state_params = jnp.zeros((1, 5))
-        steady_state_params = steady_state_params.at[:,3].set(-10)
-        steady_state_params = steady_state_params.at[:,4].set(5)
+        # steady_state_params = steady_state_params.at[:,1].set(jnp.log(0.1))
+        # steady_state_params = steady_state_params.at[:,2].set(jnp.log(1.6))
+        steady_state_params = steady_state_params.at[:,3].set(-20)
+        # steady_state_params = steady_state_params.at[:,4].set(5)
+        # steady_state_params = steady_state_params.at[:,4].set(jnp.log(100))
+        # step_varying_params = step_varying_params.at[:,0].set(jnp.log(1e-6))
         # steady_state_params = steady_state_params.at[:,1].set(-2)
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
@@ -107,6 +113,12 @@ class LAHAccelOSQPmodel(L2Omodel):
         # self.prior_param = jnp.log(self.init_var) * jnp.ones(2)
 
         # self.params = [self.mean_params, self.sigma_params, self.prior_param]
+    
+    def perturb_params(self):
+        step_varying_params = self.params[0][:-1, :]
+        steady_state_params = self.params[0][-1:, :]
+        step_varying_params = step_varying_params.at[:,3].set(-2)
+        self.params = [jnp.vstack([step_varying_params, steady_state_params])]
 
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required):
@@ -155,8 +167,8 @@ class LAHAccelOSQPmodel(L2Omodel):
             factors2 = factors2.at[0, :].set(factor[1])
                 
             all_factors = factors1, factors2
-            params[0] = params[0].at[-1,3].set(-10)
-            params[0] = params[0].at[-1,2].set(0)
+            # params[0] = params[0].at[-1,3].set(-10)
+            # params[0] = params[0].at[-1,2].set(0)
             
             osqp_params = (params[0], all_factors, rho_vec)
 

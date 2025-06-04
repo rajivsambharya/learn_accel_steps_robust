@@ -185,12 +185,13 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     m, n = A.shape
 
     if supervised:
-        # x, y, s = extract_sol(u, v, n, hsde)
-        # pr = jnp.linalg.norm(A @ x + s - q_r[n:])
-        # dr = jnp.linalg.norm(A.T @ y + P @ x + q_r[:n])
+        x, y_dual, s = extract_sol(u, v, n, hsde)
+        pr = jnp.linalg.norm(A @ x + s - q_r[n:])
+        dr = jnp.linalg.norm(A.T @ y_dual + P @ x + q_r[:n])
         # diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z_star)
-        diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z[:-1] / z[-1])
+        # diff = jnp.linalg.norm(z_next[:-1] / z_next[-1] - z[:-1] / z[-1])
         # diff = jnp.linalg.norm(z_next[:-1] - z_star) # / z[-1] - z_star)
+        diff = pr + dr
     else:
         diff = 0 #jnp.linalg.norm(z_next / z_next[-1] - z / z[-1])
     loss_vec = loss_vec.at[i].set(diff)

@@ -575,8 +575,8 @@ class LAHISTAmodel(L2Omodel):
 
 
             # stochastic_params = params[0][:n_iters, 0]
-            if special_algo == 'nesterov':
-                eval_out = self.nesterov_eval_fn(k=iters,
+            if special_algo == 'backtracking':
+                eval_out = self.backtracking_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
                                 #    params=stochastic_params[:,0],

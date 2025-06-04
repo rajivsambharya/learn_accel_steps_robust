@@ -1000,27 +1000,27 @@ class Workspace:
             np.random.seed(42)
             q_mat = jnp.array(jnp_load_obj['q_mat'])
 
-            rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
-            # rand_indices = np.arange(N)
-            # rand_indices = np.arange(1000)
+            
 
-            self.train_indices = rand_indices[:N_train]
-            # self.train_indices = rand_indices[990:1000] #rand_indices[N_test: N_test + N_train]
-            self.q_mat_train = q_mat[self.train_indices, :]
+            if example == 'quadcopter' or example == 'robust_kalman':
+                rand_indices_train = np.random.choice(self.traj_length, self.traj_length, replace=False)
+                # rand_indices_test = self.traj_length + np.random.choice(N - self.traj_length, N - self.traj_length, replace=False)
+                
+                self.train_indices = rand_indices_train[:N_train]
+                self.q_mat_train = q_mat[self.train_indices, :]
+                # self.test_indices = rand_indices_test[self.traj_length:self.traj_length+N_test]
+                self.test_indices = np.arange(self.traj_length, self.traj_length+N_test)
+                self.q_mat_test = q_mat[self.test_indices, :]
+            else:
+                rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
+                self.train_indices = rand_indices[:N_train]
+                self.q_mat_train = q_mat[self.train_indices, :]
+                self.test_indices = rand_indices[N_train:N_train + N_test]
+                self.q_mat_test = q_mat[self.test_indices, :]
 
-            self.test_indices = rand_indices[N_train:N_train + N_test]
-            # self.test_indices = rand_indices[N_test: N_test + N_train] #rand_indices[990:1000]
-            # self.test_indices = rand_indices[:N_test]
-            self.q_mat_test = q_mat[self.test_indices, :] #* 2 #+ .1
-
-            # self.val_indices = rand_indices[N_train + N_test:]
-            # self.q_mat_val = q_mat[self.val_indices, :]
-            # import pdb
-            # pdb.set_trace()
             if 'q_mat_ood' in jnp_load_obj.keys():
                 q_mat_ood = jnp.array(jnp_load_obj['q_mat_ood'])
                 self.val = True
-                # self.val_indices = rand_indices[N_train + N_test:]
                 val_rand_indices = np.random.choice(q_mat_ood.shape[0], N_val, replace=False)
                 self.val_indices = val_rand_indices[:N_val]
                 self.q_mat_val = q_mat_ood[self.val_indices, :]
@@ -1263,7 +1263,7 @@ class Workspace:
             if self.l2ws_model.algo == 'lah_ista':
                 # nesterov
                 self.l2ws_model.set_params_for_nesterov()
-                self.eval_iters_train_and_test('nesterov', None)
+                self.eval_iters_train_and_test('backtracking', None)
                 # self.l2ws_model.perturb_params()
 
             if self.l2ws_model.algo == 'lah_gd' or self.l2ws_model.algo == 'lah_stochastic_gd':
@@ -1299,8 +1299,9 @@ class Workspace:
             # pdb.set_trace()
 
             # prev sol eval
-            # if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
-            #     self.eval_iters_train_and_test('prev_sol', None)
+            if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
+                self.eval_iters_train_and_test('prev_sol', None)
+                self.l2ws_model.perturb_params()
 
         
 
@@ -1609,11 +1610,12 @@ class Workspace:
         #     else:
         #         z_stars = self.l2ws_model.z_stars_test[:num, :]
         if col == 'prev_sol':
-            if train:
+            if train == 'train':
                 q_mat_full = self.l2ws_model.q_mat_train[:num, :]
             else:
                 q_mat_full = self.l2ws_model.q_mat_test[:num, :]
             non_first_indices = jnp.mod(jnp.arange(num), self.traj_length) != 0
+
             q_mat = q_mat_full[non_first_indices, :]
             z_stars = z_stars[non_first_indices, :]
         else:
@@ -1629,6 +1631,8 @@ class Workspace:
             #     q_mat = self.q_mat_val
 
         z0_inits = self.get_inputs_for_eval(fixed_ws, num, train, col)
+        # import pdb
+        # pdb.set_trace()
 
         # do the batching
         num_batches = int(num / batch_size)
@@ -1705,6 +1709,8 @@ class Workspace:
                 num), self.traj_length) != self.traj_length - 1
             inputs = self.shifted_sol_fn(
                 self.z_stars_test[:num, :][non_last_indices, :])
+            # import pdb
+            # pdb.set_trace()
         else:
             if self.l2ws_model.lah:
                 if isinstance(self.l2ws_model, LAHOSQPmodel) or isinstance(self.l2ws_model, LAHAccelOSQPmodel):

@@ -262,8 +262,10 @@ def fixed_point_osqp(z, factor1, factor2, A, q, rho, sigma, alpha):
     rhs = sigma * x - c + A.T @ (rho * w - y)
     factor = (factor1, factor2)
 
-    x_next = alpha * lin_sys_solve(factor, rhs) + (1 - alpha) * x
-    nu = rho * (A @ x_next - w) + y
+    x_tilde = lin_sys_solve(factor, rhs)
+    x_next = alpha * x_tilde + (1 - alpha) * x
+    # nu = rho * (A @ x_next - w) + y
+    nu = rho * (A @ x_tilde - w) + y
 
     # update w_tilde
     w_tilde = w + (nu - y) / rho
@@ -320,6 +322,8 @@ def k_steps_eval_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_sta
     rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), jnp.exp(scalar_params[:, 2])
     betas = jnp.exp(scalar_params[:, 3])
     rho_vecs = rho_vec
+    # import pdb
+    # pdb.set_trace()
 
     z_all_plus_1 = jnp.zeros((k + 1, z_init.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z_init)

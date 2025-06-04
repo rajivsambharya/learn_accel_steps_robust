@@ -889,7 +889,7 @@ def run(run_cfg, lah=True):
 
     custom_visualize_fn_partial = partial(custom_visualize_fn, T=setup_cfg['T'])
     algo = 'lah_accel_scs' if lah else 'lm_scs'
-    algo = 'lah_scs'
+    # algo = 'lah_scs'
 
     A = static_dict['A_sparse']
     m, n = A.shape

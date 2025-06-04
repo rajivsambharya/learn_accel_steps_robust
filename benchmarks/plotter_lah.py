@@ -620,7 +620,7 @@ def create_lah_results_unconstrained(example, cfg, split='test'):
     plot_results_dict_unconstrained(example, results_dict, gains_dict, cfg.num_iters, split=split)
 
     # create the tables (need the accuracies and reductions for this)
-    create_acc_reduction_tables(accs_dict, acc_reductions_dict)
+    create_acc_reduction_tables(accs_dict, acc_reductions_dict, split=split)
 
     # if example == 'lasso':
     #     plot_results_wth_step_sizes(example, cfg, results_dict, gains_dict, cfg.num_iters)
@@ -651,13 +651,18 @@ def create_lah_results_constrained(example, cfg):
     create_acc_reduction_tables(accs_dict, acc_reductions_dict)
 
 
-def create_acc_reduction_tables(accs_dict, acc_reductions_dict):
+def create_acc_reduction_tables(accs_dict, acc_reductions_dict, split='test'):
     # create pandas dataframe
     df_acc = pd.DataFrame()
     df_percent = pd.DataFrame()
 
+    if 'nesterov' in accs_dict.keys():
+        accs = list(accs_dict['nesterov'].keys())
+    else:
+        accs = list(accs_dict['cold_start'].keys())
+
     # accs = list(accs_dict['cold_start'].keys())
-    accs = list(accs_dict['nesterov'].keys())
+    
 
     # df_acc
     df_acc['accuracies'] = np.array(accs)
@@ -666,7 +671,11 @@ def create_acc_reduction_tables(accs_dict, acc_reductions_dict):
         method = methods[i]
         curr_accs = np.array([accs_dict[method][acc] for acc in accs])
         df_acc[method] = curr_accs
-    df_acc.to_csv('accuracies.csv')
+    if split == 'test':
+        df_acc.to_csv('accuracies.csv')
+    else:
+        df_acc.to_csv('accuracies_val.csv')
+        
 
     # df_percent
     df_percent['accuracies'] = np.array(accs)
@@ -675,7 +684,12 @@ def create_acc_reduction_tables(accs_dict, acc_reductions_dict):
         curr_reduction = np.array([acc_reductions_dict[method][acc] for acc in accs])
         df_percent[method] = np.round(curr_reduction, decimals=2) 
 
-    df_percent.to_csv('iteration_reduction.csv')
+    if split == 'test':
+        df_percent.to_csv('iteration_reduction.csv')
+    else:
+        df_percent.to_csv('iteration_reduction_val.csv')
+        
+    
 
 
 
@@ -738,15 +752,19 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
 
     for i in range(len(methods)):
         method = methods[i]
-        style = titles_2_styles[method]
-        marker = titles_2_markers[method]
-        color = titles_2_colors[method]
-        mark_start = titles_2_marker_starts[method]
+        
 
         if method == 'lm' and 'lm10000' in methods:
             continue
         if method == 'l2ws' and 'l2ws10000' in methods:
             continue
+        if method == 'backtracking':
+            continue
+
+        style = titles_2_styles[method]
+        marker = titles_2_markers[method]
+        color = titles_2_colors[method]
+        mark_start = titles_2_marker_starts[method]
 
         # plot the values
         if example == 'logistic_regression':
@@ -963,6 +981,8 @@ def recover_data(example, dt, filename, col, min_val=1e-12):
     df = read_csv(f"{path}/{filename}")
     data = np.clip(get_eval_array(df, col), a_min=min_val, a_max=1e10)
 
+    if example == 'quadcopter' and filename == 'primal_residuals_test.csv':
+        data[0] = data[1]
     return data
 
 
