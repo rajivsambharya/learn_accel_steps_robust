@@ -1,8 +1,9 @@
 from functools import partial
 
-from lah.algo_steps import k_steps_eval_gd, k_steps_train_gd
+from lah.algo_steps import k_steps_eval_gd, k_steps_train_gd, k_steps_eval_nesterov_gd, k_steps_train_nesterov_gd
+# from lah.algo_steps_gd import k_steps_ev
 from lah.l2o_model import L2Omodel
-
+import jax.numpy as jnp
 
 class GDmodel(L2Omodel):
     def __init__(self, **kwargs):
@@ -19,7 +20,11 @@ class GDmodel(L2Omodel):
         n = P.shape[0]
         self.output_size = n
 
-        self.k_steps_train_fn = partial(k_steps_train_gd, P=P, gd_step=gd_step, jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_gd, P=P, gd_step=gd_step, jit=self.jit)
+        evals, evecs = jnp.linalg.eigh(P)
+        cond_num = jnp.max(evals) / jnp.min(evals)
+        L = jnp.max(evals)
+
+        self.k_steps_train_fn = partial(k_steps_train_nesterov_gd, P=P, gd_step=1/L, cond_num=cond_num, jit=self.jit)
+        self.k_steps_eval_fn = partial(k_steps_eval_nesterov_gd, P=P, cond_num=cond_num, params=[1 / L], jit=self.jit)
         self.out_axes_length = 5
         self.lah = False

@@ -254,6 +254,8 @@ class L2Omodel(object):
             curr_loss_fn = self.loss_fn_eval_conj_grad
         elif tag == 'adam':
             curr_loss_fn = self.loss_fn_eval_adam
+        elif tag == 'backtracking':
+            curr_loss_fn = self.loss_fn_eval_backtracking
         num_probs, _ = inputs.shape
         test_time0 = time.time()
         loss, out = curr_loss_fn(self.params, inputs, b, k, z_stars, key)

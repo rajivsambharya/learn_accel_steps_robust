@@ -452,6 +452,7 @@ def k_steps_eval_nesterov_gd(k, z0, q, params, P, cond_num, supervised, z_star, 
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 
 
+
 def k_steps_eval_lah_gd(k, z0, q, params, P, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
@@ -1408,6 +1409,18 @@ def fp_train_gd(i, val, supervised, z_star, P, c, gd_step):
     return z_next, loss_vec
 
 
+def fp_train_nesterov_gd(i, val, supervised, z_star, P, c, gd_step, beta):
+    z, y, loss_vec = val
+    y_next = fixed_point_gd(z, P, c, gd_step)
+    z_next = y_next + beta * (y_next - y)
+    if supervised:
+        diff = jnp.linalg.norm(z - z_star)
+    else:
+        diff = jnp.linalg.norm(z_next - z)
+    loss_vec = loss_vec.at[i].set(diff)
+    return z_next, y_next, loss_vec
+
+
 
 def fp_eval_ista(i, val, supervised, z_star, A, b, lambd, ista_step):
     z, loss_vec, z_all, obj_diffs = val
@@ -1557,6 +1570,28 @@ def k_steps_train_gd(k, z0, q, P, gd_step, supervised, z_star, jit):
     else:
         out = python_fori_loop(start_iter, k, fp_train_partial, val)
     z_final, iter_losses = out
+    return z_final, iter_losses
+
+
+def k_steps_train_nesterov_gd(k, z0, q, P, gd_step, cond_num, supervised, z_star, jit):
+    iter_losses = jnp.zeros(k)
+    beta = (jnp.sqrt(3 * cond_num + 1) - 2) / (jnp.sqrt(3 * cond_num + 1) + 2)
+
+    fp_train_partial = partial(fp_train_nesterov_gd,
+                               supervised=supervised,
+                               z_star=z_star,
+                               P=P,
+                               c=q,
+                               gd_step=gd_step,
+                               beta=beta
+                               )
+    val = z0, z0, iter_losses
+    start_iter = 0
+    if jit:
+        out = lax.fori_loop(start_iter, k, fp_train_partial, val)
+    else:
+        out = python_fori_loop(start_iter, k, fp_train_partial, val)
+    z_final, y_final, iter_losses = out
     return z_final, iter_losses
 
 

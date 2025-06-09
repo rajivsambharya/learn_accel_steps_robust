@@ -404,14 +404,6 @@ def fixed_point_prox_gd_backtracking(z, A, b, lam, eta_init, beta, alpha):
     grad = grad_smooth(z, A, b)
     eta = eta_init
 
-    # def cond_fn(val):
-    #     eta, _ = val
-    #     z_new = soft_thresholding(z - eta * grad, eta * lam)
-    #     lhs = 0.5 * jnp.sum((A @ z_new - b)**2)
-    #     rhs = 0.5 * jnp.sum((A @ z - b)**2) - alpha * eta * jnp.dot(grad, grad)
-    #     # lhs = full_obj(z_new, A, b, lam)
-    #     # rhs = full_obj(z, A, b, lam) - alpha * eta * jnp.dot(grad, grad)
-    #     return lhs > rhs
     def cond_fn(val):
         eta, _ = val
         z_new = soft_thresholding(z - eta * grad, eta * lam)
@@ -431,7 +423,7 @@ def fixed_point_prox_gd_backtracking(z, A, b, lam, eta_init, beta, alpha):
     return z_next, eta_final
 
 # Single iteration body
-def fp_eval_lasso(i, val, supervised, z_star, A, b, lambd, beta, alpha):
+def fp_eval_lasso_backtracking(i, val, supervised, z_star, A, b, lambd, beta, alpha):
     z, t, loss_vec, z_all, obj_diffs, eta_init = val
     z_next, eta_next = fixed_point_prox_gd_backtracking(z, A, b, lambd, eta_init, beta, alpha)
     t_next = t + 1
@@ -456,7 +448,7 @@ def k_steps_eval_lasso_backtracking(k, z0, A, q, lambd, eta0, supervised, z_star
 
     val = z0, t0, iter_losses, z_all, obj_diffs, eta0
 
-    fp_eval_partial = partial(fp_eval_lasso,
+    fp_eval_partial = partial(fp_eval_lasso_backtracking,
                               supervised=supervised,
                               z_star=z_star,
                               A=A,
@@ -476,3 +468,222 @@ def k_steps_eval_lasso_backtracking(k, z0, A, q, lambd, eta0, supervised, z_star
     z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
 
     return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
+
+
+
+
+
+
+# Gradient of the smooth part
+def grad_smooth(z, A, b):
+    return A.T @ (A @ z - b)
+
+# Full objective
+def full_obj(z, A, b, lam):
+    return 0.5 * jnp.sum((A @ z - b)**2) + lam * jnp.sum(jnp.abs(z))
+
+# Soft thresholding
+def soft_thresholding(x, tau):
+    return jnp.sign(x) * jnp.maximum(jnp.abs(x) - tau, 0.0)
+
+# Backtracking on Nesterov update
+def fixed_point_prox_nesterov_backtracking(z, y, A, b, lam, eta_init, beta, shrink):
+    eta = eta_init
+    # grad_y = grad_smooth((1 - eta) * z + eta * v, A, b)
+
+    def cond_fn(val):
+        eta, _ = val
+        # theta = eta
+        # y = (1 - theta) * z + theta * v
+        
+        # x_next = soft_thresholding(y - eta * grad, eta * lam)
+        # f_x_next = 0.5 * jnp.sum((A @ x_next - b) ** 2)
+        # f_y = 0.5 * jnp.sum((A @ y - b) ** 2)
+        # return f_x_next > f_y - (eta / 2.0) * jnp.sum(grad ** 2)
+
+        grad = grad_smooth(y, A, b)
+        z_new = soft_thresholding(y - eta * grad, eta * lam)
+        
+        y_new = z_new + beta * (z_new - z)
+        f_old = 0.5 * jnp.sum((A @ z_new - b)**2)
+        f_new = 0.5 * jnp.sum((A @ y_new - b)**2)
+        inner_prod = jnp.dot(grad, z_new - y_new)
+        quad_term = (1 / (2 * eta)) * jnp.sum((z_new - y_new) ** 2)
+
+        return f_new > f_old + inner_prod + quad_term
+
+    def body_fn(val):
+        eta, _ = val
+        return eta * shrink, None
+
+    eta_final, _ = lax.while_loop(cond_fn, body_fn, (eta, None))
+
+    # Compute final update
+    theta = eta_final
+    # y = (1 - theta) * z + theta * 0
+    grad = grad_smooth(z, A, b)
+    z_next = soft_thresholding(y - eta_final * grad, eta_final * lam)
+    y_next = z_next + beta * (z_next - z)
+    
+
+    return z_next, y_next, eta_final
+
+# Single iteration
+def fp_eval_lasso_nesterov_backtracking(i, val, supervised, z_star, A, b, lambd, shrink):
+    z, y, t, loss_vec, z_all, obj_diffs, eta_init = val
+    # beta = (i - 2) / (i + 1)
+    t_next = t + 1
+    beta = (t_next - 1) / (t_next + 2)
+
+    z_next, y_next, eta_next = fixed_point_prox_nesterov_backtracking(z, y, A, b, lambd, eta_init, beta, shrink)
+
+    # t_next = t + 1
+    # y_next = z + (t_next - 1) / (t_next + 2) * (z_next - z)
+
+    diff = jnp.linalg.norm(z - z_star) if supervised else jnp.linalg.norm(z_next - z)
+    loss_vec = loss_vec.at[i].set(diff)
+    z_all = z_all.at[i, :].set(z_next)
+
+    obj = full_obj(z_next, A, b, lambd)
+    opt_obj = full_obj(z_star, A, b, lambd)
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+    return z_next, y_next, t_next, loss_vec, z_all, obj_diffs, eta_next
+
+# Top-level loop
+def k_steps_eval_lasso_nesterov_backtracking(k, z0, A, q, lambd, eta0, supervised, z_star, jit, shrink=0.95):
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size)).at[0, :].set(z0)
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    t0 = 1
+    v0 = z0
+
+    val = z0, v0, t0, iter_losses, z_all, obj_diffs, eta0
+
+    fp_eval_partial = partial(fp_eval_lasso_nesterov_backtracking,
+                              supervised=supervised,
+                              z_star=z_star,
+                              A=A,
+                              b=q,
+                              lambd=lambd,
+                              shrink=shrink)
+
+    if jit:
+        out = lax.fori_loop(0, k, fp_eval_partial, val)
+    else:
+        for i in range(k):
+            val = fp_eval_partial(i, val)
+        out = val
+
+    z_final, _, _, iter_losses, z_all, obj_diffs, _ = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+
+    return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
+def fixed_point_fista_backtracking__(x_km1, x_km2, t_km1, theta_km1, mu0_k, A, b, lam, beta):
+    # def fista_step(x_km1, x_km2, t_km1, theta_km1):
+    #     t_k = (1 + jnp.sqrt(1 + 4 * t_km1**2)) / 2
+    #     theta_k = t_km1 / t_k
+    #     y_k = x_km1 + theta_k * (x_km1 - x_km2)
+    #     return t_k, y_k
+    def fista_step(x_km1, x_km2, t_k, theta_k):
+        t_kp1 = (1 + jnp.sqrt(1 + 4 * (theta_k ** 2) * t_k ** 2)) / 2
+        y_kp1 = x_km1 + (t_k - 1) / t_kp1 * (x_km1 - x_km2)
+        return t_kp1, y_kp1
+
+
+    def grad_smooth(z):
+        return A.T @ (A @ z - b)
+
+    def full_obj(z):
+        return 0.5 * jnp.sum((A @ z - b) ** 2) + lam * jnp.sum(jnp.abs(z))
+
+    def Q_mu(p, y, grad_y, mu):
+        return (full_obj(y) +
+                jnp.dot(grad_y, p - y) +
+                (1 / (2 * mu)) * jnp.sum((p - y) ** 2) +
+                lam * jnp.sum(jnp.abs(p)))
+
+    def prox_step(y, grad_y, mu):
+        return soft_thresholding(y - mu * grad_y, mu * lam)
+
+    mu_k = mu0_k
+    t_k, y_k = fista_step(x_km1, x_km2, t_km1, theta_km1)
+
+    grad_y = grad_smooth(y_k)
+    p_mu_y = prox_step(y_k, grad_y, mu_k)
+
+    def cond_fn(val):
+        mu_k, _, _ = val
+        p_mu_y = prox_step(y_k, grad_y, mu_k)
+        return full_obj(p_mu_y) > Q_mu(p_mu_y, y_k, grad_y, mu_k)
+
+    def body_fn(val):
+        mu_k, theta_km1, _ = val
+        mu_k_new = mu_k * beta
+        theta_km1_new = theta_km1 / beta
+        return mu_k_new, theta_km1_new, prox_step(y_k, grad_y, mu_k_new)
+
+    mu_k, theta_km1, x_k = lax.while_loop(cond_fn, body_fn, (mu_k, theta_km1, p_mu_y))
+
+    # Post-update
+    mu0_kp1 = mu_k  # next iteration’s initial mu
+    theta_k = mu_k / mu0_kp1
+    t_k, y_kp1 = fista_step(x_k, x_km1, t_k, theta_k)
+
+    return x_k, x_km1, t_k, theta_k, mu0_kp1
+
+def fp_eval_fista_backtracking__(i, val, supervised, z_star, A, b, lam, beta):
+    x_km1, x_km2, t_km1, theta_km1, loss_vec, z_all, obj_diffs, mu0_k = val
+
+    x_k, x_km1_new, t_k, theta_k, mu0_kp1 = fixed_point_fista_backtracking__(
+        x_km1, x_km2, t_km1, theta_km1, mu0_k, A, b, lam, beta
+    )
+
+    diff = jnp.linalg.norm(x_k - z_star) if supervised else jnp.linalg.norm(x_k - x_km1)
+    loss_vec = loss_vec.at[i].set(diff)
+    z_all = z_all.at[i, :].set(x_k)
+
+    obj = 0.5 * jnp.sum((A @ x_k - b) ** 2) + lam * jnp.sum(jnp.abs(x_k))
+    opt_obj = 0.5 * jnp.sum((A @ z_star - b) ** 2) + lam * jnp.sum(jnp.abs(z_star))
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+    return x_k, x_km1_new, t_k, theta_k, loss_vec, z_all, obj_diffs, mu0_kp1
+
+def k_steps_eval_fista_backtracking__(k, z0, A, q, lambd, eta0, supervised, z_star, jit, beta=0.8):
+    d = z0.size
+    iter_losses = jnp.zeros(k)
+    z_all = jnp.zeros((k, d))
+    obj_diffs = jnp.zeros(k)
+
+    x_km2 = z0
+    x_km1 = z0
+    t_km1 = 0.0
+    theta_km1 = 1.0
+    mu0_k = eta0
+
+    val = x_km1, x_km2, t_km1, theta_km1, iter_losses, z_all, obj_diffs, mu0_k
+
+    partial_eval = partial(fp_eval_fista_backtracking__,
+                           supervised=supervised,
+                           z_star=z_star,
+                           A=A,
+                           b=q,
+                           lam=lambd,
+                           beta=beta)
+
+    if jit:
+        out = lax.fori_loop(0, k, partial_eval, val)
+    else:
+        for i in range(k):
+            val = partial_eval(i, val)
+        out = val
+
+    x_final, _, _, _, iter_losses, z_all, obj_diffs, _ = out
+    z_all_plus_1 = jnp.zeros((k + 1, d)).at[0, :].set(z0).at[1:, :].set(z_all)
+
+    return x_final, iter_losses, z_all_plus_1, obj_diffs

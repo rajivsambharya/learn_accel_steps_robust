@@ -756,7 +756,7 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
 
         if method == 'lm' and 'lm10000' in methods:
             continue
-        if method == 'l2ws' and 'l2ws10000' in methods:
+        if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
         if method == 'backtracking':
             continue
@@ -800,7 +800,7 @@ def populate_acc_reductions_dict(accs_dict):
 
 def populate_curr_method_acc_reductions_dict(cold_start_dict, method_dict):
     curr_method_acc_reductions_dict = {}
-    accs = [0.1, 0.01, 0.001, 0.0001]
+    accs = [0.1, 0.01, 0.001, 0.0001, 0.00001]
     for i in range(len(accs)):
         curr_method_acc_reductions_dict[accs[i]] = 1 - method_dict[accs[i]] / cold_start_dict[accs[i]]
     return curr_method_acc_reductions_dict
@@ -818,7 +818,7 @@ def populate_accs_dict(results_dict, constrained=True):
 
 def populate_curr_method_acc_dict(method_dict, constrained):
     accs_dict = {}
-    accs = [0.1, 0.01, 0.001, 0.0001]
+    accs = [0.1, 0.01, 0.001, 0.0001, 0.00001]
     pr_dr_maxes = method_dict['pr_dr_max'] if constrained else method_dict['obj_diff']
     for i in range(len(accs)):
         if pr_dr_maxes.min() < accs[i]:
@@ -880,6 +880,8 @@ def method2col(method):
         col = 'conj_grad'
     elif method == 'prev_sol':
         col = 'prev_sol'
+    elif method == 'backtracking':
+        col = 'backtracking'
     else:
         col = 'last'
     return col
@@ -1078,6 +1080,8 @@ def get_eval_array(df, title):
         data = df['conj_grad']
     elif title == 'prev_sol':
         data = df['prev_sol']
+    elif title == 'backtracking':
+        data = df['backtracking']
     elif title == 'l2ws':
         data = df.iloc[:, -1]
     elif title == 'l2ws10000':

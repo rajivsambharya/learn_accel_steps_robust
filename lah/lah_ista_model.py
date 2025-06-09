@@ -5,7 +5,7 @@ from jax import random
 
 import numpy as np
 
-from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista, k_steps_eval_lasso_backtracking
+from lah.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista, k_steps_eval_lasso_backtracking, k_steps_eval_lasso_nesterov_backtracking, k_steps_eval_fista_backtracking__
 from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
@@ -72,7 +72,7 @@ class LAHISTAmodel(L2Omodel):
                                             jit=self.jit)
             self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
                                         jit=self.jit)
-        self.nesterov_eval_fn = partial(k_steps_eval_lasso_backtracking, lambd=lambd, eta0=1.0, A=A,
+        self.backtracking_eval_fn = partial(k_steps_eval_fista_backtracking__, lambd=lambd, eta0=10.0, A=A,
                                        jit=self.jit)
 
         self.out_axes_length = 5
@@ -88,6 +88,11 @@ class LAHISTAmodel(L2Omodel):
 
         # e2e_loss_fn = self.create_end2end_loss_fn
         self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+
+        # end-to-end loss fn for silver evaluation
+        e2e_loss_fn = self.create_end2end_loss_fn
+        self.loss_fn_eval_backtracking = e2e_loss_fn(bypass_nn=False, diff_required=False, 
+                                               special_algo='backtracking')
         
 
 
@@ -573,7 +578,6 @@ class LAHISTAmodel(L2Omodel):
                 eval_fn = self.k_steps_eval_fn
 
 
-
             # stochastic_params = params[0][:n_iters, 0]
             if special_algo == 'backtracking':
                 eval_out = self.backtracking_eval_fn(k=iters,
@@ -586,7 +590,7 @@ class LAHISTAmodel(L2Omodel):
                 angles = None
             elif bypass_nn:
                 # use nesterov's acceleration
-                eval_out = self.nesterov_eval_fn(k=iters,
+                eval_out = self.backtracking_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
                                 #    params=stochastic_params[:,0],

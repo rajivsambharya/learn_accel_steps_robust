@@ -1,13 +1,13 @@
 methods: 
   lah_accel: 2025-05-21/11-18-43
-  nearest_neighbor: 2025-05-21/13-12-53
-  nesterov: 2025-05-21/13-12-53
+  nearest_neighbor: 2025-06-04/13-51-48 #2025-05-21/13-12-53
+  nesterov: 2025-06-04/13-51-48 #2025-05-21/13-12-53
   lah_accel_1: 2025-05-21/13-12-53  #2025-05-22/13-24-54
   lah_accel_2: 2025-05-21/13-12-53 
   lah_accel_3: 2025-05-21/13-12-53  #2025-05-21/13-12-53
   learned_no_accel_safeguard: 2025-05-22/13-24-54
   learned_no_accel: 2025-05-21/12-41-30
-  backtracking: 2025-06-04/10-05-01
+  backtracking: 2025-06-04/13-51-48
 num_iters: 31
 step_size_iters: 30
 

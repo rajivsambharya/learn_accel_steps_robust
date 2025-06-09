@@ -1250,21 +1250,27 @@ class Workspace:
             if self.load_weights_datetime is not None:
                 self.load_weights(
                     self.example, self.load_weights_datetime, self.nn_load_type)
+            if self.l2ws_model.algo == 'lah_ista':
+                # nesterov
+                self.l2ws_model.set_params_for_nesterov()
+                self.eval_iters_train_and_test('backtracking', None)
+                # self.l2ws_model.perturb_params()
 
             # no learning evaluation
             self.eval_iters_train_and_test('no_train', None)
 
             # if self.l2ws_model.lah:
             # nearest neighbor
-            if self.l2ws_model.lah:
-                self.eval_iters_train_and_test('nearest_neighbor', None)
-                jax.clear_caches()
+            self.eval_iters_train_and_test('nearest_neighbor', None)
+            # if self.l2ws_model.lah:
+            #     self.eval_iters_train_and_test('nearest_neighbor', None)
+            #     jax.clear_caches()
 
-            if self.l2ws_model.algo == 'lah_ista':
-                # nesterov
-                self.l2ws_model.set_params_for_nesterov()
-                self.eval_iters_train_and_test('backtracking', None)
-                # self.l2ws_model.perturb_params()
+            # if self.l2ws_model.algo == 'lah_ista':
+            #     # nesterov
+            #     self.l2ws_model.set_params_for_nesterov()
+            #     self.eval_iters_train_and_test('backtracking', None)
+            #     # self.l2ws_model.perturb_params()
 
             if self.l2ws_model.algo == 'lah_gd' or self.l2ws_model.algo == 'lah_stochastic_gd':
                 # conj_grad
@@ -1729,7 +1735,7 @@ class Workspace:
                     elif train == 'val':
                         inputs = self.z_stars_val[:num, :] * 0
             else:
-                if train:
+                if train == 'train':
                     inputs = self.l2ws_model.train_inputs[:num, :]
                 else:
                     inputs = self.l2ws_model.test_inputs[:num, :]
