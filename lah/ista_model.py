@@ -1,8 +1,8 @@
 from functools import partial
 
-from lah.algo_steps import (
-    k_steps_eval_ista,
-    k_steps_train_ista,
+from lah.algo_steps_ista import (
+    k_steps_eval_fista_l2ws,
+    k_steps_train_fista_l2ws,
 )
 from lah.l2o_model import L2Omodel
 
@@ -22,9 +22,9 @@ class ISTAmodel(L2Omodel):
         m, n = A.shape
         self.output_size = n
 
-        self.k_steps_train_fn = partial(k_steps_train_ista, A=A, lambd=lambd, 
+        self.k_steps_train_fn = partial(k_steps_train_fista_l2ws, A=A, lambd=lambd, 
                                         ista_step=ista_step, jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_ista, A=A, lambd=lambd, 
+        self.k_steps_eval_fn = partial(k_steps_eval_fista_l2ws, A=A, lambd=lambd, 
                                        ista_step=ista_step, jit=self.jit)
         self.out_axes_length = 5
         self.lah = False

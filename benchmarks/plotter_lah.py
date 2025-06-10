@@ -758,7 +758,7 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             continue
         if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
-        if method == 'backtracking':
+        if method == 'backtracking' or method == 'lista' or method == 'lista10000':
             continue
 
         style = titles_2_styles[method]

@@ -1006,8 +1006,7 @@ class Workspace:
         # load the mean
         loaded_mean = jnp.load(f"{folder}/params.npz")
         mean_params = jnp.array(loaded_mean['mean_params'])
-        # import pdb
-        # pdb.set_trace()
+
         self.l2ws_model.params = [mean_params]
 
 
@@ -1259,8 +1258,7 @@ class Workspace:
         if train == 'test':
             if self.closed_loop_rollout_dict is not None:
                 self.run_closed_loop_rollouts(col)
-        # import pdb
-        # pdb.set_trace()
+
 
         if self.save_weights_flag:
             self.save_weights()
@@ -1330,8 +1328,7 @@ class Workspace:
             elif self.l2ws_model.algo == 'lah_accel_logisticgd' or self.l2ws_model.algo == 'lah_gd_accel':
                 # adam
                 self.eval_iters_train_and_test('adam', None)
-            # import pdb
-            # pdb.set_trace()
+
 
             # prev sol eval
             if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
