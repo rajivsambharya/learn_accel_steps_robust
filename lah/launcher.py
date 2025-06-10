@@ -34,6 +34,7 @@ from lah.lah_scs_model import LAHSCSmodel
 from lah.lm_scs_model import LMSCSmodel
 from lah.lm_osqp_model import LMOSQPmodel
 from lah.lah_osqp_accel_model import LAHAccelOSQPmodel
+from lah.lista_model import LISTAmodel
 from lah.launcher_helper import (
     compute_kl_inv_vector,
     get_nearest_neighbors,
@@ -217,6 +218,8 @@ class Workspace:
             self.create_lah_accel_osqp_model(cfg, static_dict)
         elif algo == 'lah_accel_box_qp':
             self.create_lah_box_qp_accel_model(cfg, static_dict)
+        elif algo == 'lista':
+            self.create_lista_model(cfg, static_dict)
         
         
         
@@ -439,6 +442,31 @@ class Workspace:
                                        pep_regularizer_coeff=cfg.pep_regularizer_coeff,
                                        pep_target=cfg.pep_target,
                                        algo_dict=input_dict)
+        
+    def create_lista_model(self, cfg, static_dict):
+        # get A, lambd, ista_step
+        W, D = static_dict['W'], static_dict['D']
+        alista_cfg = {'step': static_dict['step'], 'eta': static_dict['eta']}
+        # ista_step = static_dict['ista_step']
+
+        input_dict = dict(algorithm='lista',
+                          b_mat_train=self.q_mat_train,
+                          b_mat_test=self.q_mat_test,
+                          D=D,
+                          W=W,
+                          lambd=cfg.lambd
+                          )
+        self.l2ws_model = LISTAmodel(train_unrolls=self.train_unrolls,
+                                     eval_unrolls=self.eval_unrolls,
+                                     train_inputs=self.train_inputs,
+                                     test_inputs=self.test_inputs,
+                                     regression=cfg.supervised,
+                                     nn_cfg=cfg.nn_cfg,
+                                    #  pac_bayes_cfg=cfg.pac_bayes_cfg,
+                                     z_stars_train=self.z_stars_train,
+                                     z_stars_test=self.z_stars_test,
+                                    #  alista_cfg=alista_cfg,
+                                     algo_dict=input_dict)
         
     def create_lah_box_qp_accel_model(self, cfg, static_dict):
         if 'A' in static_dict.keys():
@@ -1012,7 +1040,8 @@ class Workspace:
                 self.test_indices = np.arange(self.traj_length, self.traj_length+N_test)
                 self.q_mat_test = q_mat[self.test_indices, :]
             else:
-                rand_indices = np.random.choice(q_mat.shape[0], N, replace=False)
+                
+                rand_indices = np.random.choice(q_mat.shape[0], N_train + N_test, replace=False)
                 self.train_indices = rand_indices[:N_train]
                 self.q_mat_train = q_mat[self.train_indices, :]
                 self.test_indices = rand_indices[N_train:N_train + N_test]

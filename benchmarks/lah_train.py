@@ -64,6 +64,19 @@ def main_run_lasso_lm(cfg):
     lasso.run(cfg, model='lm')
 
 
+@hydra.main(config_path='configs/lasso', config_name='lasso_lista_run.yaml')
+def main_run_lasso_lista(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'lasso'
+    setup_datetime = cfg.data.datetime
+    if setup_datetime == '':
+        # get the most recent datetime and update datetimes
+        setup_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = setup_datetime
+    copy_data_file(example, setup_datetime)
+    lasso.run_lista(cfg)
+
+
 @hydra.main(config_path='configs/mnist', config_name='mnist_run.yaml')
 def main_run_mnist(cfg):
     orig_cwd = hydra.utils.get_original_cwd()
@@ -291,6 +304,10 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'lasso/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_lasso_lm()
+    elif sys.argv[1] == 'lasso_lista':
+        sys.argv[1] = base + 'lasso/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_lasso_lista()
     elif sys.argv[1] == 'mnist':
         sys.argv[1] = base + 'mnist/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]

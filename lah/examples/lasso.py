@@ -7,6 +7,70 @@ from lah.examples.solve_script import ista_setup_script
 import os
 from scipy.sparse import random
 
+
+
+def run_lista(run_cfg):
+    example = "lasso"
+    data_yaml_filename = 'data_setup_copied.yaml'
+
+    # read the yaml file
+    with open(data_yaml_filename, "r") as stream:
+        try:
+            setup_cfg = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+            setup_cfg = {}
+
+    # set the seed
+    np.random.seed(setup_cfg['seed'])
+    m_orig, n_orig = setup_cfg['m_orig'], setup_cfg['n_orig']
+    A_scale = setup_cfg['A_scale']
+    # A = A_scale * jnp.array(np.random.normal(size=(m_orig, n_orig)))
+
+    # evals, evecs = jnp.linalg.eigh(A.T @ A)
+    # ista_step =  1 / evals.max()
+    # lambd = setup_cfg['lambd']
+
+    # get D
+    D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
+    D = D / np.linalg.norm(D, axis=0)
+    D = np.array(D)
+
+    
+
+    # get the ista values
+    evals, evecs = jnp.linalg.eigh(D.T @ D)
+    step = 1 / evals.max()
+    lambd = .1
+    eta = lambd * step
+
+    # form W
+    W = get_W(D)
+    W, D = jnp.array(W), jnp.array(D)
+
+    static_dict = dict(D=D, W=W, step=step, eta=eta, lambd=lambd)
+
+    # we directly save q now
+    static_flag = True
+    # algo = 'alista'
+    algo = 'lista' #run_cfg.get('algo', 'alista')
+    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
+
+    # run the workspace
+    workspace.run()
+
+def get_W(D):
+    m, n = D.shape
+    W = cp.Variable((m, n))
+    obj = cp.norm(W.T @ D, 'fro') ** 2
+    constraints = []
+    for i in range(m):
+        constraints.append(W[i, :] @ D[i, :] == 1)
+    prob = cp.Problem(cp.Minimize(obj), constraints)
+    prob.solve(solver=cp.SCS, verbose=True)
+
+    return W.value
+
 def run(run_cfg, model='lah'):
     example = "lasso"
     data_yaml_filename = 'data_setup_copied.yaml'
