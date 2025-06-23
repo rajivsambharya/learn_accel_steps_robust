@@ -406,6 +406,48 @@ def build_A_matrix_prox_with_xstar(alpha_list, beta_list):
 
     return A
 
+def build_A_matrix_op_with_xstar(alpha_list, beta_list):
+    """
+    JAX-friendly version
+
+    Returns A: jnp.ndarray of shape (k+2, k+3), where rows are:
+    - A[0] to A[k]: x_0 to x_k
+    - A[k+1]: x_star
+
+    Basis: [x_0, x_star, q_0, ..., q_{k-1}, q_k]
+    """
+    k = alpha_list.shape[0]
+    n_basis = k + 3  # [x0, x*, q_0, ..., q_{k-1}, q_k]
+    A0 = jnp.zeros((k + 2, n_basis))
+
+    idx_x0 = 0
+    idx_xstar = 1
+    idx_q = lambda t: 2 + t
+
+    # Initialize A[0] = x0
+    A0 = A0.at[0, idx_x0].set(1.0)
+
+    def body(i, A):
+        x_i = A[i]
+        x_im1 = A[i - 1] if i > 0 else A[0]
+
+        # Build y_i and y_{i-1}
+        y_i = x_i - 0.5 * alpha_list[i] * (x_i.at[idx_q(i)].add(-1))
+        if i == 0:
+            y_im1 = x_im1 #x_im1.at[idx_g(i)].add(-alpha_list[i])
+        else:
+            y_im1 = x_im1 - 0.5 * alpha_list[i-1] * (x_im1.at[idx_q(i-1)].add(-1))
+
+        x_ip1 = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
+        return A.at[i + 1].set(x_ip1)
+
+    A = lax.fori_loop(0, k, body, A0)
+
+    # x_star
+    A = A.at[k + 1, idx_xstar].set(1.0)
+
+    return A
+
 
 def create_nesterov_strcvx_pep_sdp_layer(mu, L, num_iters):
 
@@ -761,7 +803,79 @@ def create_proxgd_pep_sdp_layer(L, num_iters, cache=True, save=True):
 
 
 
+def create_admm_pep_sdp_layer(num_iters):
+    """
+    performance metric: ||z - S(z)||^2 where S is 1-Lipschitz
+    """
 
+    k = num_iters
+    A = cp.Parameter((k+2, k+3))
+
+    # Define Gram matrix G and function values F
+    G = cp.Variable((2*k + 3, 2*k + 3), PSD=True)  # Gram of [x_0, x^*, q_0, ..., q_k, x_1, ..., x_k]
+    F = cp.Variable(k + 2)  # f(x_0), ..., f(x_k), f(x^*)
+
+    constraints = []
+
+    # Determine gradient indices
+    def op_idx(idx):
+        if idx <= k: 
+            return 2 + idx  # q_0 to q_k
+        else:  # q^* = x^*
+            return 1
+
+    # Determine iterate indices
+    def iter_idx(idx):
+        if idx >= 1 and idx <= k:
+            return k + 2 + idx
+        elif idx == 0:
+            return 0
+        else:
+            return 1
+
+    # Interpolation constraints: for i,j in {0, ..., k, *}
+    for i in range(k + 2):  # includes x_0,...,x_k, x^*
+        for j in range(k + 2):
+            if i != j:
+                # Indices
+                qi_idx = op_idx(i)
+                qj_idx = op_idx(j)
+
+                xi_idx = iter_idx(i)
+                xj_idx = iter_idx(j)
+
+                # ||g_i - g_j||^2
+                op_diff_norm_sq = (
+                    G[qi_idx, qi_idx]
+                    - 2 * G[qi_idx, qj_idx]
+                    + G[qj_idx, qj_idx]
+                )
+
+                # ||x_i - x_j - (1/L)(g_i - g_j)||^2
+                xi_minus_xj_sq = G[xi_idx, xi_idx] - 2 * G[xi_idx, xj_idx] + G[xj_idx, xj_idx]
+
+                # Interpolation inequality
+                constraints.append(
+                    op_diff_norm_sq <= xi_minus_xj_sq
+                )
+    
+    # Equality constraint: express x_1, ... x_k as a function of x_0, g_0, ... g_k using A
+    # it seems that the last row of A is not required?
+    for i in range(1, k+1):
+        Ai = A[i].T
+        current_idx = iter_idx(i)
+        constraints.append(G[:, range(k+3)] @ Ai == G[:, current_idx])
+
+    # Optional: normalize ||x_0 - x^*||^2 = 1
+    constraints.append(G[0,0] + G[1,1] - 2*G[0,1] == 1)
+
+    # Objective: maximize worst-case ||x_k - q_k||^2
+    objective = cp.Maximize(G[2*k+2, 2*k+2] - 2*G[2*k+2, k+2] + G[k+2, k+2])
+    prob = cp.Problem(objective, constraints)
+    
+    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G])
+    
+    return cvxpylayer
 
 
 
