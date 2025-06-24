@@ -133,6 +133,8 @@ def plot_samples(num_plot, thetas, train_inputs, z_stars):
         sample_plot(train_inputs, 'input', num_plot)
         if z_stars is not None:
             sample_plot(z_stars, 'z_stars', num_plot)
+        # import pdb
+        # pdb.set_trace()
 
 def plot_samples_scs(num_plot, thetas, train_inputs, x_stars, y_stars, z_stars):
     sample_plot(thetas, 'theta', num_plot)

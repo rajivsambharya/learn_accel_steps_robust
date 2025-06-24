@@ -218,3 +218,216 @@ def k_steps_eval_backtracking(k, z0, q, eta0, P, supervised, z_star, jit, beta=0
     z_final, _, iter_losses, z_all, obj_diffs, _ = out
     z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
     return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
+
+# def fixed_point_nesterov_backtracking(x_km1, x_km2, t_km1, theta_km1, mu0_k, A, b, lam, beta):
+#     # def fista_step(x_km1, x_km2, t_km1, theta_km1):
+#     #     t_k = (1 + jnp.sqrt(1 + 4 * t_km1**2)) / 2
+#     #     theta_k = t_km1 / t_k
+#     #     y_k = x_km1 + theta_k * (x_km1 - x_km2)
+#     #     return t_k, y_k
+#     def fista_step(x_km1, x_km2, t_k, theta_k):
+#         t_kp1 = (1 + jnp.sqrt(1 + 4 * (theta_k ** 2) * t_k ** 2)) / 2
+#         y_kp1 = x_km1 + (t_k - 1) / t_kp1 * (x_km1 - x_km2)
+#         return t_kp1, y_kp1
+
+
+#     def grad_smooth(z):
+#         return A.T @ (A @ z - b)
+
+#     def full_obj(z):
+#         return 0.5 * jnp.sum((A @ z - b) ** 2) + lam * jnp.sum(jnp.abs(z))
+
+#     def Q_mu(p, y, grad_y, mu):
+#         return (full_obj(y) +
+#                 jnp.dot(grad_y, p - y) +
+#                 (1 / (2 * mu)) * jnp.sum((p - y) ** 2) +
+#                 lam * jnp.sum(jnp.abs(p)))
+
+#     def prox_step(y, grad_y, mu):
+#         return soft_thresholding(y - mu * grad_y, mu * lam)
+
+#     mu_k = mu0_k
+#     t_k, y_k = fista_step(x_km1, x_km2, t_km1, theta_km1)
+
+#     grad_y = grad_smooth(y_k)
+#     p_mu_y = prox_step(y_k, grad_y, mu_k)
+
+#     def cond_fn(val):
+#         mu_k, _, _ = val
+#         p_mu_y = prox_step(y_k, grad_y, mu_k)
+#         return full_obj(p_mu_y) > Q_mu(p_mu_y, y_k, grad_y, mu_k)
+
+#     def body_fn(val):
+#         mu_k, theta_km1, _ = val
+#         mu_k_new = mu_k * beta
+#         theta_km1_new = theta_km1 / beta
+#         return mu_k_new, theta_km1_new, prox_step(y_k, grad_y, mu_k_new)
+
+#     mu_k, theta_km1, x_k = lax.while_loop(cond_fn, body_fn, (mu_k, theta_km1, p_mu_y))
+
+#     # Post-update
+#     mu0_kp1 = mu_k  # next iteration’s initial mu
+#     theta_k = mu_k / mu0_kp1
+#     t_k, y_kp1 = fista_step(x_k, x_km1, t_k, theta_k)
+
+#     return x_k, x_km1, t_k, theta_k, mu0_kp1
+
+# def fp_eval_nesterov_backtracking(i, val, supervised, z_star, A, b, lam, beta):
+#     x_km1, x_km2, t_km1, theta_km1, loss_vec, z_all, obj_diffs, mu0_k = val
+
+#     x_k, x_km1_new, t_k, theta_k, mu0_kp1 = fixed_point_nesterov_backtracking(
+#         x_km1, x_km2, t_km1, theta_km1, mu0_k, A, b, lam, beta
+#     )
+
+#     diff = jnp.linalg.norm(x_k - z_star) if supervised else jnp.linalg.norm(x_k - x_km1)
+#     loss_vec = loss_vec.at[i].set(diff)
+#     z_all = z_all.at[i, :].set(x_k)
+
+#     obj = 0.5 * jnp.sum((A @ x_k - b) ** 2) + lam * jnp.sum(jnp.abs(x_k))
+#     opt_obj = 0.5 * jnp.sum((A @ z_star - b) ** 2) + lam * jnp.sum(jnp.abs(z_star))
+#     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+#     return x_k, x_km1_new, t_k, theta_k, loss_vec, z_all, obj_diffs, mu0_kp1
+
+# def k_steps_eval_nesterov_backtracking(k, z0, A, q, lambd, eta0, supervised, z_star, jit, beta=0.8):
+#     d = z0.size
+#     iter_losses = jnp.zeros(k)
+#     z_all = jnp.zeros((k, d))
+#     obj_diffs = jnp.zeros(k)
+
+#     x_km2 = z0
+#     x_km1 = z0
+#     t_km1 = 0.0
+#     theta_km1 = 1.0
+#     mu0_k = eta0
+
+#     val = x_km1, x_km2, t_km1, theta_km1, iter_losses, z_all, obj_diffs, mu0_k
+
+#     partial_eval = partial(fp_eval_nesterov_backtracking,
+#                            supervised=supervised,
+#                            z_star=z_star,
+#                            A=A,
+#                            b=q,
+#                            lam=lambd,
+#                            beta=beta)
+
+#     if jit:
+#         out = lax.fori_loop(0, k, partial_eval, val)
+#     else:
+#         for i in range(k):
+#             val = partial_eval(i, val)
+#         out = val
+
+#     x_final, _, _, _, iter_losses, z_all, obj_diffs, _ = out
+#     z_all_plus_1 = jnp.zeros((k + 1, d)).at[0, :].set(z0).at[1:, :].set(z_all)
+
+#     return x_final, iter_losses, z_all_plus_1, obj_diffs
+
+# ---------------------------------------------------------------------
+# one accelerated-gradient step with back-tracking for the quadratic
+# ---------------------------------------------------------------------
+def fixed_point_nesterov_backtracking(x_km1, x_km2, t_km1, theta_km1,
+                                      mu0_k, P, c, beta=0.8):
+    """Return (x_k, x_{k-1}, t_k, θ_k, next_mu0)."""
+    # Nesterov extrapolation --------------------------------------------------
+    def nesterov_step(x_prev, x_prevprev, t_prev, theta_prev):
+        t_next = (1. + jnp.sqrt(1. + 4.*(theta_prev**2)*t_prev**2)) / 2.
+        y_next = x_prev + (t_prev - 1.)/t_next * (x_prev - x_prevprev)
+        return t_next, y_next
+
+    # grad and objective ------------------------------------------------------
+    def grad_f(z):           # ∇f(z)=Pz+c
+        return P @ z + c
+
+    def obj_f(z):            # f(z)
+        return 0.5 * jnp.dot(z, P @ z) + jnp.dot(c, z)
+
+    # ------------------------------------------------------------------------
+    mu_k         = mu0_k
+    t_k, y_k     = nesterov_step(x_km1, x_km2, t_km1, theta_km1)
+    g_y          = grad_f(y_k)
+    candidate    = y_k - mu_k * g_y            # tentative GD step
+
+    # helper giving the quadratic upper bound at y_k
+    def Q_mu(p, y, grad_y, mu):
+        return obj_f(y) + jnp.dot(grad_y, p - y) + (0.5/mu)*jnp.sum((p - y)**2)
+
+    # back-tracking -----------------------------------------------------------
+    def cond(state):
+        mu, = state
+        p = y_k - mu * g_y
+        return obj_f(p) > Q_mu(p, y_k, g_y, mu)
+
+    def body(state):
+        mu, = state
+        return (mu * beta,)
+
+    (mu_k,) = lax.while_loop(cond, body, (mu_k,))
+
+    # accepted iterate
+    x_k         = y_k - mu_k * g_y
+    mu0_kp1     = mu_k         # warm-start next iteration
+    theta_k     = mu_k / mu0_kp1  # (=1, but keeps the interface)
+    t_k, _      = nesterov_step(x_k, x_km1, t_k, theta_k)
+
+    return x_k, x_km1, t_k, theta_k, mu0_kp1
+
+
+# ---------------------------------------------------------------------
+# bookkeeping for lax.fori_loop
+# ---------------------------------------------------------------------
+def fp_eval_nesterov_backtracking(i, state, supervised, z_star, P, c, beta):
+    x_km1, x_km2, t_km1, theta_km1, losses, traj, obj_diffs, mu0_k = state
+
+    x_k, x_km1_new, t_k, theta_k, mu0_kp1 = fixed_point_nesterov_backtracking(
+        x_km1, x_km2, t_km1, theta_km1, mu0_k, P, c, beta
+    )
+
+    diff        = jnp.linalg.norm(x_k - z_star) if supervised else jnp.linalg.norm(x_k - x_km1)
+    losses      = losses.at[i].set(diff)
+    traj        = traj.at[i, :].set(x_k)
+
+    f_xk        = 0.5 * jnp.dot(x_k, P @ x_k) + jnp.dot(c, x_k)
+    f_star      = 0.5 * jnp.dot(z_star, P @ z_star) + jnp.dot(c, z_star)
+    obj_diffs   = obj_diffs.at[i].set(f_xk - f_star)
+
+    return x_k, x_km1_new, t_k, theta_k, losses, traj, obj_diffs, mu0_kp1
+
+
+# ---------------------------------------------------------------------
+# k-step driver
+# ---------------------------------------------------------------------
+def k_steps_eval_nesterov_backtracking(k, z0, P, q, eta0,
+                                       supervised, z_star,
+                                       jit=True, beta=0.8):
+    d           = z0.size
+    losses      = jnp.zeros(k)
+    traj        = jnp.zeros((k, d))
+    obj_diffs   = jnp.zeros(k)
+
+    # initial state -----------------------------------------------------------
+    state = (z0,           # x_{k-1}
+             z0,           # x_{k-2}
+             0.0,          # t_{k-1}
+             1.0,          # θ_{k-1}
+             losses,
+             traj,
+             obj_diffs,
+             eta0)         # μ₀₍ₖ₎
+
+    loop_body = partial(fp_eval_nesterov_backtracking,
+                        supervised=supervised,
+                        z_star=z_star,
+                        P=P,
+                        c=q,
+                        beta=beta)
+
+    final_state = lax.fori_loop(0, k, loop_body, state) if jit else \
+                  (lambda s: [loop_body(i, s) for i in range(k)][-1])(state)
+
+    x_final, *_ = final_state
+    traj_full   = jnp.vstack([z0, final_state[5]])  # prepend z0
+
+    return x_final, final_state[4], traj_full, final_state[6]

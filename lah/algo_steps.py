@@ -1623,28 +1623,6 @@ def k_steps_eval_ista(k, z0, q, lambd, A, ista_step, supervised, z_star, jit):
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 
 
-def k_steps_eval_fista(k, z0, q, lambd, A, ista_step, supervised, z_star, jit):
-    iter_losses, obj_diffs = jnp.zeros(k), jnp.zeros(k)
-    z_all_plus_1 = jnp.zeros((k + 1, z0.size))
-    z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
-    fp_eval_partial = partial(fp_eval_fista,
-                              supervised=supervised,
-                              z_star=z_star,
-                              A=A,
-                              b=q,
-                              lambd=lambd,
-                              ista_step=ista_step
-                              )
-    z_all = jnp.zeros((k, z0.size))
-    val = z0, iter_losses, z_all, obj_diffs
-    start_iter = 0
-    if jit:
-        out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
-    else:
-        out = python_fori_loop(start_iter, k, fp_eval_partial, val)
-    z_final, iter_losses, z_all, obj_diffs = out
-    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
-    return z_final, iter_losses, z_all_plus_1, obj_diffs
 
 
 def k_steps_eval_gd(k, z0, q, P, gd_step, supervised, z_star, jit):

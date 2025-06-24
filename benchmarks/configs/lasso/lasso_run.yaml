@@ -1,8 +1,8 @@
 model: lasco
 nn_cfg:
-  lr: 1e-2
+  lr: 1e-1
   method: adam
-  batch_size: 1000
+  batch_size: 100
   epochs: 4000
 
 
@@ -10,7 +10,7 @@ data:
   datetime: ''
 
 train_unrolls: 30
-eval_unrolls: 400
+eval_unrolls: 100
 eval_every_x_epochs: 50
 save_every_x_epochs: 1
 test_every_x_epochs: 1

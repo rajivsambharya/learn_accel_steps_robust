@@ -6,7 +6,7 @@ from jax import random
 import numpy as np
 
 from lah.algo_steps import k_steps_eval_lah_gd, k_steps_train_lah_gd, k_steps_eval_nesterov_gd, k_steps_eval_conj_grad
-from lah.algo_steps_gd import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_adagrad, k_steps_eval_backtracking
+from lah.algo_steps_gd import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_adagrad, k_steps_eval_backtracking, k_steps_eval_nesterov_backtracking
 from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
@@ -55,8 +55,11 @@ class LAHAccelGDmodel(L2Omodel):
                                        jit=self.jit)
         # self.adam_eval_fn = partial(k_steps_eval_adagrad, P=P, step_size=0.01,
         #                                jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_backtracking, P=P, eta0=10.0,
+        # self.adam_eval_fn = partial(k_steps_eval_backtracking, P=P, eta0=10.0,
+        #                                jit=self.jit)
+        self.adam_eval_fn = partial(k_steps_eval_nesterov_backtracking, P=P, eta0=10.0,
                                        jit=self.jit)
+        
         
         self.out_axes_length = 5
         # import pdb

@@ -1767,6 +1767,8 @@ class Workspace:
                     inputs = self.l2ws_model.test_inputs[:num, :]
         if self.l2ws_model.algo == 'lah_scs':
             inputs = jnp.hstack([inputs, jnp.ones((inputs.shape[0], 1))])
+        # import pdb
+        # pdb.set_trace()
         return inputs
 
 
@@ -1939,8 +1941,8 @@ class Workspace:
 
         # do the closed loop rollouts
         rollout_results_list = []
-        # for i in range(num_rollouts):
-        for i in range(1):
+        for i in range(num_rollouts):
+        # for i in range(1):
             # get x_init_traj
             thetas_index = i * rollout_length
             x_init_traj = self.thetas_test[thetas_index, :nx]  # assumes theta = (x0, u0, x_ref)
