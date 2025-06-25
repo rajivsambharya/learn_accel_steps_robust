@@ -45,6 +45,8 @@ class LAHAccelGDmodel(L2Omodel):
 
         cond_num = self.smooth_param / self.str_cvx_param
 
+        self.accel = input_dict['accel']
+
         self.k_steps_train_fn = partial(k_steps_train_lah_nesterov_gd, P=P,
                                         jit=self.jit)
         self.k_steps_eval_fn = partial(k_steps_eval_lah_nesterov_gd, P=P,
@@ -57,7 +59,7 @@ class LAHAccelGDmodel(L2Omodel):
         #                                jit=self.jit)
         # self.adam_eval_fn = partial(k_steps_eval_backtracking, P=P, eta0=10.0,
         #                                jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_nesterov_backtracking, P=P, eta0=10.0,
+        self.adam_eval_fn = partial(k_steps_eval_nesterov_backtracking, P=P, eta0=1.0,
                                        jit=self.jit)
         
         
@@ -100,9 +102,10 @@ class LAHAccelGDmodel(L2Omodel):
 
     def transform_params(self, params, n_iters):
         # n_iters = params[0].size
-        transformed_params = jnp.zeros((n_iters, 2))
-        transformed_params = transformed_params.at[:n_iters - 1, :].set(jnp.exp(params[0][:n_iters - 1, :]))
-        transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        # transformed_params = jnp.zeros((n_iters, 2))
+        # transformed_params = transformed_params.at[:n_iters - 1, :].set(jnp.exp(params[0][:n_iters - 1, :]))
+        # transformed_params = transformed_params.at[n_iters - 1, :].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, :]))
+        transformed_params = jnp.exp(params[0])
         return transformed_params
 
     def perturb_params(self):
@@ -151,12 +154,24 @@ class LAHAccelGDmodel(L2Omodel):
             
         beta = ((3*L / mu + 1)**.5 - 2) / ((3*L / mu + 1)**.5 + 2)
         step_varying_params = step_varying_params.at[:,1].set(jnp.log(beta))
+        if not self.accel:
+            # perturb
+            perturb = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num)), a_min=-1, a_max=1)) * 0.01
+            step_varying_params = step_varying_params.at[:,0].set(step_varying_params[:,0] + perturb)
+            step_varying_params = step_varying_params.at[:,1].set(jnp.log(1e-10))
 
         # init steady_state_params
-        steady_state_params = sigmoid_inv(4 / (3*self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 2))
-        steady_state_params = steady_state_params.at[0,1].set(sigmoid_inv(beta))
+        # steady_state_params = sigmoid_inv(4 / (3*self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 2))
+        # steady_state_params = steady_state_params.at[0,1].set(sigmoid_inv(beta))
+        steady_state_params = jnp.log(4 / (3*self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 2))
+        steady_state_params = steady_state_params.at[0,1].set(jnp.log(beta))
+        if not self.accel:
+            steady_state_params = steady_state_params.at[:,1].set(jnp.log(1e-10))
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+
+        # if not self.accel:
+        #     self.perturb_params()
         
 
 
@@ -183,9 +198,9 @@ class LAHAccelGDmodel(L2Omodel):
                     # stochastic_params = stochastic_params.at[:n_iters - 1, 0].set(jnp.exp(params[0][:n_iters - 1, 0]))
                     # stochastic_params = stochastic_params.at[n_iters - 1, 0].set(2 / self.smooth_param * sigmoid(params[0][n_iters - 1, 0]))
                     stochastic_params = self.transform_params(params, n_iters)
-                    
+            if not self.accel:
+                stochastic_params = stochastic_params.at[:, 1].set(0)
 
-            
 
             if self.train_fn is not None:
                 train_fn = self.train_fn

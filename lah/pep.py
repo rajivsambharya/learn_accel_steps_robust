@@ -208,9 +208,10 @@ def pepit_accel_gd(mu, L, params, quad, prox, obj):
     pepit_verbose = max(verbose, 0)
     try:
         pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+        # pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.SCS)
     except Exception as e:
         print('exception', e)
-        pepit_tau = 0
+        pepit_tau = np.inf
 
     # Print conclusion if required
     verbose = 1

@@ -30,7 +30,9 @@ def fp_eval_lah_nesterov_str_cvx_gd(i, val, supervised, z_star, P, c, gd_steps, 
         diff = jnp.linalg.norm(z_next - z)
     loss_vec = loss_vec.at[i].set(diff)
     z_all = z_all.at[i, :].set(z_next)
-    obj = .5 * y_next @ P @ y_next + c @ y_next
+    # obj = .5 * y_next @ P @ y_next + c @ y_next
+    # opt_obj = .5 * z_star @ P @ z_star + c @ z_star
+    obj = .5 * y @ P @ y + c @ y
     opt_obj = .5 * z_star @ P @ z_star + c @ z_star
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
     return z_next, y_next, t_next, loss_vec, z_all, obj_diffs
@@ -389,7 +391,7 @@ def fp_eval_nesterov_backtracking(i, state, supervised, z_star, P, c, beta):
     losses      = losses.at[i].set(diff)
     traj        = traj.at[i, :].set(x_k)
 
-    f_xk        = 0.5 * jnp.dot(x_k, P @ x_k) + jnp.dot(c, x_k)
+    f_xk        = 0.5 * jnp.dot(x_km1, P @ x_km1) + jnp.dot(c, x_km1)
     f_star      = 0.5 * jnp.dot(z_star, P @ z_star) + jnp.dot(c, z_star)
     obj_diffs   = obj_diffs.at[i].set(f_xk - f_star)
 
@@ -401,7 +403,7 @@ def fp_eval_nesterov_backtracking(i, state, supervised, z_star, P, c, beta):
 # ---------------------------------------------------------------------
 def k_steps_eval_nesterov_backtracking(k, z0, P, q, eta0,
                                        supervised, z_star,
-                                       jit=True, beta=0.8):
+                                       jit=True, beta=0.99):
     d           = z0.size
     losses      = jnp.zeros(k)
     traj        = jnp.zeros((k, d))

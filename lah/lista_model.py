@@ -59,9 +59,22 @@ class LISTAmodel(L2Omodel):
         self.lah = False
 
     def init_params(self):
+        k = self.eval_unrolls
+        
+
+        t_params = jnp.ones(k)
+        t = 1
+        for i in range(1, k):
+            t = .5 * (1 + jnp.sqrt(1 + 4 * t ** 2))
+            t_params = t_params.at[i].set(t) #(jnp.log(t))
+        beta_params = convert_t_to_beta(t_params)
+        all_betas = jnp.concatenate([jnp.zeros(self.train_unrolls), beta_params[:-self.train_unrolls]])
+
+
         # self.mean_params = (jnp.ones((self.train_unrolls, 2)),
         #                         jnp.ones((self.m, self.n)))
-        self.mean_params = (self.lambd / self.L * jnp.ones((self.train_unrolls)),
+        self.mean_params = (self.lambd / self.L * jnp.ones((k)),
+                            all_betas,
                             self.W_1_tensor, # + .001,
                             self.W_2_tensor, # + .001
                             )
@@ -229,3 +242,10 @@ class LISTAmodel(L2Omodel):
         avg_posterior_var = variances.mean()
         stddev_posterior_var = variances.std()
         return avg_posterior_var, stddev_posterior_var
+    
+def convert_t_to_beta(t_vals):
+    beta_vals = jnp.ones(t_vals.size)
+    for i in range(1, t_vals.size):
+        beta_vals = beta_vals.at[i-1].set((t_vals[i-1] - 1) / t_vals[i])
+    return beta_vals
+

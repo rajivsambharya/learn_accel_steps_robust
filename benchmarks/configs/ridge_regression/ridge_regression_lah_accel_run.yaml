@@ -2,19 +2,19 @@ nn_cfg:
   lr: 1e-2
   method: adam
   batch_size: 100
-  epochs: 500
+  epochs: 5000
 
 data:
   datetime: ''
 
 train_unrolls: 40
 eval_unrolls: 200
-eval_every_x_epochs: 50 #2 #50 #50
+eval_every_x_epochs: 100 #2 #50 #50
 save_every_x_epochs: 1
 test_every_x_epochs: 1
 write_csv_every_x_batches: 1
 epochs_jit: 2
-N_train: 10000
+N_train: 10 #000
 N_test: 1000
 N_val: 1000
 num_samples_train: 10
@@ -24,9 +24,10 @@ plot_iterates: [0, 10, 20]
 loss_method: 'fixed_k' # 'fixed_k' #'fixed_k' #'constant_sum'
 normalize_inputs: False #True
 
-pep_regularizer_coeff: 0 #100
+pep_regularizer_coeff: 0 #10 #100
 pep_target: 0.5
 
 accuracies: [.1, .01, .001, .0001]
 skip_startup: False #True
 save_weights_flag: True
+accel: True

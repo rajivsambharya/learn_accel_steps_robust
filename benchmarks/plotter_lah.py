@@ -14,14 +14,25 @@ from lah.examples.mnist import plot_mult_mnist_img
 from lah.pep import pepit_nesterov, pepit_accel_gd
 
 from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_starts, titles_2_markers, titles_2_styles
+import matplotlib as mpl
+# mpl.rc("axes", labelsize=14, titlesize=16)
+from matplotlib.ticker import MaxNLocator
+import matplotlib.ticker as ticker
 
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",   # For talks, use sans-serif
-    "font.size": 30,
+    # "font.size": 38,
+    # "axes.titlesize": 34,
+    # "font.titlesize": 33
+    "axes.labelsize": 38,
+    "axes.titlesize": 38
     # "font.size": 30,
     # "font.size": 16,
 })
+# Optional: give ticks their own family
+plt.rc("xtick", labelsize=38, labelcolor="black")
+plt.rc("ytick", labelsize=38, labelcolor="black")
 import os
 import re
 cmap = plt.cm.Set1
@@ -239,17 +250,27 @@ def plot_step_sizes(example, cfg):
         1. step_sizes
         2. momentum_sizes
     """
+    # Optional: give ticks their own family
+    # plt.rc("xtick", labelsize=32, labelcolor="black")
+    # plt.rc("ytick", labelsize=32, labelcolor="black")
+
     # get the step sizes (for silver and learned)
     step_sizes_dict = get_lah_gd_step_size(example, cfg)
     
-    
-    
-    step_sizes_list = [step_sizes_dict['nesterov'].to_numpy()[:, 1], step_sizes_dict['lah_1'].to_numpy()[:, 1], step_sizes_dict['lah_2'].to_numpy()[:, 1], step_sizes_dict['lah_3'].to_numpy()[:, 1]]
-    
-    momentum_list = [step_sizes_dict['nesterov'].to_numpy()[:, 2], step_sizes_dict['lah_1'].to_numpy()[:, 2], step_sizes_dict['lah_2'].to_numpy()[:, 2], step_sizes_dict['lah_3'].to_numpy()[:, 2]]
+    # step_sizes_list = [step_sizes_dict['nesterov'].to_numpy()[:, 1], step_sizes_dict['lah_1'].to_numpy()[:, 1], step_sizes_dict['lah_2'].to_numpy()[:, 1], step_sizes_dict['lah_3'].to_numpy()[:, 1]]
+    # momentum_list = [step_sizes_dict['nesterov'].to_numpy()[:, 2], step_sizes_dict['lah_1'].to_numpy()[:, 2], step_sizes_dict['lah_2'].to_numpy()[:, 2], step_sizes_dict['lah_3'].to_numpy()[:, 2]]
+
+    step_sizes_list = []
+    momentum_list = []
+    for i in range(len(cfg.plot_step_sizes)):
+        curr_entry = cfg.plot_step_sizes[i]
+        step_sizes_list.append(step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 1])
+        if curr_entry == 'learned_no_accel':
+            momentum_list.append(0 * step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 1])
+        else:
+            momentum_list.append(step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 2])
     
     worst_case_vals = []
-    # L = 1 / step_sizes_list[0][0]
     if example == 'lasso':
         mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], False, True, 'func'
     elif example == 'logistic_regression':
@@ -259,14 +280,21 @@ def plot_step_sizes(example, cfg):
         step_size = step_sizes_list[0][0]
         L = (4 / step_size - mu) / 3
         quad, prox, obj = True, False, 'dist'
-        # import pdb
-        # pdb.set_trace()
-        # lah_out = get_pep_results(step_sizes_dict['lah'].to_numpy()[:, 1][:30], 0*step_sizes_dict['lah'].to_numpy()[:, 1][:30], mu, L, quad, prox, obj)
-    
-        
-    for i in range(4):
+
+    for i in range(len(cfg.plot_step_sizes)):
         worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], mu, L, quad, prox, obj))
-    titles = [fr'nesterov: $\gamma = {worst_case_vals[0]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[1]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[2]:.3f}$', r'no robustness: $\gamma =\infty$']
+    # titles = [fr'nesterov: $\gamma = {worst_case_vals[0]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[1]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[2]:.3f}$', r'no robustness: $\gamma =\infty$']
+    titles = []
+    for i in range(len(cfg.plot_step_sizes)):
+        curr_entry = cfg.plot_step_sizes[i]
+        gamma_str = r"\infty" if np.isinf(worst_case_vals[i]) else f"{worst_case_vals[i]:.3f}"
+        if curr_entry == 'nesterov':
+            title = fr'Nesterov: $\gamma = {gamma_str}$'
+        elif curr_entry in ['lah_accel', 'lah_accel_1', 'lah_accel_2']:
+            title = fr'LAH Accel: $\gamma = {gamma_str}$'
+        elif curr_entry == 'learned_no_accel':
+            title = fr'LAH: $\gamma = {gamma_str}$'
+        titles.append(title)
     
     # create the actual plots
     # 1) step sizes
@@ -275,13 +303,15 @@ def plot_step_sizes(example, cfg):
     colors = cmap.colors
     fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
     axes[0].set_ylabel('step sizes')
-    # axes[0].set_yscale('log')
+    axes[0].set_yscale('log')
+    # axes[0].yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=2))
+    # axes[0].xaxis.set_major_locator(ticker.LinearLocator(numticks=3))
     for i in range(4):
         axes[i].set_xlabel('iterations')
         axes[i].set_title(titles[i])
         axes[i].bar(np.arange(step_size_iters), step_sizes_list[i][:step_size_iters], color='black')
         axes[i].hlines(2 / L, 0, step_size_iters, color=colors[7])
-    
+    # plt.gca().yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
     plt.tight_layout()
     plt.savefig('step_sizes.pdf', bbox_inches='tight')
     plt.clf()
@@ -289,7 +319,9 @@ def plot_step_sizes(example, cfg):
 
     fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
     axes[0].set_ylabel('momentum sizes')
+    # axes[0].yaxis.set_major_locator(ticker.LinearLocator(numticks=4))
     # axes[0].set_yscale('log')
+    # axes[0].xaxis.set_major_locator(ticker.LinearLocator(numticks=3))
     for i in range(4):
         axes[i].set_xlabel('iterations')
         axes[i].set_title(titles[i])
@@ -572,6 +604,9 @@ def read_step_size_data(dt_path, method):
     elif method == 'nearest_neighbor':
         df = read_csv(f"{dt_path}/lah_weights/nearest_neighbor/params.csv")
     # elif method == 'lah':
+    elif method == 'learned_no_accel':
+        last_folder = find_last_folder_starting_with(f"{dt_path}/lah_weights", 'train_epoch')
+        df = read_csv(f"{dt_path}/lah_weights/{last_folder}/params.csv") #read_csv(f"{dt_path}/lah_weights/silver/params.csv")
     elif method[:3] == 'lah':
         # get all of the folder starting with 'train_epoch_...'
         # all_train_epoch_folders = 
@@ -758,7 +793,7 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             continue
         if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
-        if method == 'backtracking' or method == 'lista' or method == 'lista10000':
+        if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
             continue
 
         style = titles_2_styles[method]
@@ -774,7 +809,10 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,  markevery=(0, 3))
                                     # markevery=(mark_start, markevery))
         
-
+    # plt.locator_params(axis="y", nbins=5)   # works on the current Axes
+    # plt.locator_params(numticks=5)
+    # plt.gca().yaxis.set_major_locator(MaxNLocator(numticks=5))
+    plt.gca().yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
     plt.tight_layout()
     if split == 'test':
         plt.savefig('obj_diff_test.pdf', bbox_inches='tight')
