@@ -41,7 +41,7 @@ class LISTAmodel(L2Omodel):
 
         self.k_steps_train_fn = partial(k_steps_train_lista,
                                         jit=self.jit)
-        self.k_steps_eval_fn = partial(k_steps_eval_lista, D=D,
+        self.k_steps_eval_fn = partial(k_steps_eval_lista, D=D, lambd=lambd,
                                        jit=self.jit)
         self.out_axes_length = 5
 

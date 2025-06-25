@@ -932,17 +932,17 @@ def k_steps_train_lista(k, z0, q, params, supervised, z_star, jit):
                                b=q,
                                params=params
                                )
-    val = z0, iter_losses
+    val = z0, z0, iter_losses
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_train_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_train_partial, val)
-    z_final, iter_losses = out
+    z_final, y_final, iter_losses = out
     return z_final, iter_losses
 
 
-def k_steps_eval_lista(k, z0, D, q, params, supervised, z_star, jit):
+def k_steps_eval_lista(k, z0, D, lambd, q, params, supervised, z_star, jit):
     iter_losses, obj_diffs = jnp.zeros(k), jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
@@ -950,17 +950,18 @@ def k_steps_eval_lista(k, z0, D, q, params, supervised, z_star, jit):
                               supervised=supervised,
                                z_star=z_star,
                                D=D,
+                               lambd=lambd,
                                b=q,
                                params=params
                               )
     z_all = jnp.zeros((k, z0.size))
-    val = z0, iter_losses, z_all, obj_diffs
+    val = z0, z0, iter_losses, z_all, obj_diffs
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_eval_partial, val)
-    z_final, iter_losses, z_all, obj_diffs = out
+    z_final, y_final, iter_losses, z_all, obj_diffs = out
     z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 
@@ -974,38 +975,43 @@ def fixed_point_lista(z, W_1, W_2, b, theta):
 
 
 def fp_train_lista(i, val, supervised, z_star, params, b):
-    z, loss_vec = val
+    z, y, loss_vec = val
     # gamma = params[0][i, 0] #jnp.exp(params[i, 0])
     # theta = params[0][i, 1] #jnp.exp(params[i, 1])
     # W = params[1]
     theta = params[0][i]
-    W_1 = params[1][:,:,i]
-    W_2 = params[2][:,:,i]
+    beta = params[1][i]
+    W_1 = params[2][:,:,i]
+    W_2 = params[3][:,:,i]
 
-    z_next = fixed_point_lista(z, W_1, W_2, b, theta)
+    y_next = fixed_point_lista(z, W_1, W_2, b, theta)
+    z_next = y_next + beta * (y_next - y)
+
     diff = jnp.linalg.norm(z - z_star) ** 2
     loss_vec = loss_vec.at[i].set(diff)
-    return z_next, loss_vec
+    return z_next, y_next, loss_vec
 
 
-def fp_eval_lista(i, val, D, supervised, z_star, params, b):
-    z, loss_vec, z_all, obj_diffs = val
+def fp_eval_lista(i, val, D, lambd, supervised, z_star, params, b):
+    z, y, loss_vec, z_all, obj_diffs = val
     # gamma = params[0][i, 0] #jnp.exp(params[i, 0])
     # theta = params[0][i, 1] #jnp.exp(params[i, 1])
     # W = params[1]
     theta = params[0][i]
-    W_1 = params[1][:,:,i]
-    W_2 = params[2][:,:,i]
-    z_next = fixed_point_lista(z, W_1, W_2, b, theta)
+    beta = params[1][i]
+    W_1 = params[2][:,:,i]
+    W_2 = params[3][:,:,i]
+    y_next = fixed_point_lista(z, W_1, W_2, b, theta)
+    z_next = y_next + beta * (y_next - y)
     diff = 10 * jnp.log10(jnp.linalg.norm(z - z_star) ** 2 / jnp.linalg.norm(z_star) ** 2)
     loss_vec = loss_vec.at[i].set(diff)
 
     # D = W_2
-    obj = .5 * jnp.linalg.norm(D @ z_next - b) ** 2 # + lambd * jnp.linalg.norm(z_next, ord=1)
-    opt_obj = .5 * jnp.linalg.norm(D @ z_star - b) ** 2 # + lambd * jnp.linalg.norm(z_star, ord=1)
+    obj = .5 * jnp.linalg.norm(D @ z_next - b) ** 2 + lambd * jnp.linalg.norm(z_next, ord=1)
+    opt_obj = .5 * jnp.linalg.norm(D @ z_star - b) ** 2 + lambd * jnp.linalg.norm(z_star, ord=1)
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
     z_all = z_all.at[i, :].set(z_next)
-    return z_next, loss_vec, z_all, obj_diffs
+    return z_next, y_next, loss_vec, z_all, obj_diffs
 
 
 def k_steps_train_tilista(k, z0, q, params, D, supervised, z_star, jit):
