@@ -289,6 +289,7 @@ class Workspace:
                           P=P
                           )
         self.l2ws_model = LAHGDmodel(train_unrolls=self.train_unrolls,
+                                     step_varying_num=cfg.get('step_varying_num', 50),
                                        eval_unrolls=self.eval_unrolls,
                                        train_inputs=self.train_inputs,
                                        test_inputs=self.test_inputs,
@@ -308,7 +309,8 @@ class Workspace:
                           c_mat_train=self.q_mat_train,
                           c_mat_test=self.q_mat_test,
                           gd_step=gd_step,
-                          P=P
+                          P=P,
+                          accel=static_dict['accel']
                           )
         
         self.l2ws_model = LAHAccelGDmodel(train_unrolls=self.train_unrolls,
@@ -1357,8 +1359,6 @@ class Workspace:
 
         num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls + 1)
 
-        
-
         for window in range(num_progressive_trains):
             # update window_indices
             window_indices = jnp.arange(int(self.train_unrolls * window / self.l2ws_model.num_const_steps), 
@@ -1368,18 +1368,32 @@ class Workspace:
             # update the train inputs
             update_train_inputs_flag = window > 0 and self.l2ws_model.lah
 
+            # import tracemalloc
+            # import sys
+            # from pympler import asizeof
+            # tracemalloc.start()
+            # snap0 = tracemalloc.take_snapshot()
+
+
             # update the method for the steady-state
             for epoch_batch in range(num_epochs_jit):
+                # snap = tracemalloc.take_snapshot()  # current state
+                # for stat in snap.statistics('lineno')[:10]:
+                #     print(f"{stat.size/1024:8.1f} KiB  {stat.traceback}")
+                # import pdb
+                # pdb.set_trace()
                 epoch = int(epoch_batch * self.epochs_jit) + window * num_epochs_jit * self.epochs_jit
                 print('epoch', epoch)
 
                 if (test_zero and epoch == 0) or (epoch % self.eval_every_x_epochs == 0 and epoch > 0):
+                    jax.clear_caches()
                     if update_train_inputs_flag:
                         self.eval_iters_train_and_test(f"train_epoch_{epoch}",self.train_unrolls * window)
                         update_train_inputs_flag = False
                         jax.clear_caches()
                     else:
                         self.eval_iters_train_and_test(f"train_epoch_{epoch}", None)
+                        # jax.clear_caches()
 
                 # setup the permutations
                 permutation = setup_permutation(
@@ -1432,6 +1446,8 @@ class Workspace:
                     plot_train_test_losses(self.l2ws_model.tr_losses_batch,
                                         self.l2ws_model.te_losses,
                                         self.l2ws_model.num_batches, self.epochs_jit)
+            if self.l2ws_model.accel:
+                break # no progressive training
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
         self.get_confidence_bands()            
         
@@ -1670,6 +1686,8 @@ class Workspace:
         num_batches = int(num / batch_size)
         full_eval_out = []
         key = 64 if col == 'silver' else 1 + self.l2ws_model.step_varying_num
+        # import pdb
+        # pdb.set_trace()
 
         if num_batches <= 1:
             eval_out = self.l2ws_model.evaluate(
@@ -1767,6 +1785,8 @@ class Workspace:
                     inputs = self.l2ws_model.test_inputs[:num, :]
         if self.l2ws_model.algo == 'lah_scs':
             inputs = jnp.hstack([inputs, jnp.ones((inputs.shape[0], 1))])
+        # import pdb
+        # pdb.set_trace()
         return inputs
 
 
@@ -1939,8 +1959,8 @@ class Workspace:
 
         # do the closed loop rollouts
         rollout_results_list = []
-        # for i in range(num_rollouts):
-        for i in range(1):
+        for i in range(num_rollouts):
+        # for i in range(1):
             # get x_init_traj
             thetas_index = i * rollout_length
             x_init_traj = self.thetas_test[thetas_index, :nx]  # assumes theta = (x0, u0, x_ref)

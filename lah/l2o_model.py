@@ -47,6 +47,8 @@ class L2Omodel(object):
                  y_stars_test=None,
                  loss_method='fixed_k',
                  algo_dict={}):
+        if pep_regularizer_coeff is not None and pep_regularizer_coeff > 0:
+            jax.config.update('jax_disable_jit', True)
         self.pep_regularizer_coeff = pep_regularizer_coeff
         self.pep_target = pep_target
         dict = algo_dict
@@ -76,7 +78,8 @@ class L2Omodel(object):
         self.create_all_loss_fns(loss_method, regression)
         
 
-        self.step_varying_num = train_unrolls #step_varying_num # 50
+        # self.step_varying_num = train_unrolls #step_varying_num # 50
+        self.step_varying_num = step_varying_num # 50
 
         # neural network setup
         self.initialize_neural_network(nn_cfg, plateau_decay)

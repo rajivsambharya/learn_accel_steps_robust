@@ -181,8 +181,21 @@ def main_run_maxcut_lm(cfg):
     maxcut.run(cfg, lasco=False)
 
 
-@hydra.main(config_path='configs/ridge_regression', config_name='ridge_regression_run.yaml')
+@hydra.main(config_path='configs/ridge_regression', config_name='ridge_regression_lah_accel_run.yaml')
 def main_run_ridge_regression(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'ridge_regression'
+    agg_datetime = cfg.data.datetime
+    if agg_datetime == '':
+        # get the most recent datetime and update datetimes
+        agg_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = agg_datetime
+    copy_data_file(example, agg_datetime)
+    ridge_regression.run(cfg)
+
+
+@hydra.main(config_path='configs/ridge_regression', config_name='ridge_regression_lah_run.yaml')
+def main_run_ridge_regression_lah(cfg):
     orig_cwd = hydra.utils.get_original_cwd()
     example = 'ridge_regression'
     agg_datetime = cfg.data.datetime
@@ -332,10 +345,14 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'maxcut/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_maxcut_lm()
-    elif sys.argv[1] == 'ridge_regression':
+    elif sys.argv[1] == 'ridge_regression_lah_accel':
         sys.argv[1] = base + 'ridge_regression/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_ridge_regression()
+    elif sys.argv[1] == 'ridge_regression_lah':
+        sys.argv[1] = base + 'ridge_regression/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_ridge_regression_lah()
     elif sys.argv[1] == 'ridge_regression_l2ws':
         sys.argv[1] = base + 'ridge_regression/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]

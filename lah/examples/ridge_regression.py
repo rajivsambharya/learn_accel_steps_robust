@@ -28,22 +28,20 @@ def run(run_cfg, lah=True):
     # A = np.random.normal(size=(m_orig, n_orig)) #/ 10
     D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
     A = jnp.array(D / np.linalg.norm(D, axis=0))
-    # P = A.T @ A + lambd * np.identity(n_orig)
     P = A.T @ A  + lambd * np.identity(n_orig)
 
     gd_step = 1 / P.max()
 
     gauss_mean = jnp.zeros(n_orig)
     gauss_var = A.T @ A
-    static_dict = dict(P=P, gd_step=gd_step, gauss_mean=gauss_mean, gauss_var=gauss_var)
+    static_dict = dict(P=P, gd_step=gd_step, gauss_mean=gauss_mean, gauss_var=gauss_var, accel=run_cfg.accel)
 
     # we directly save q now
     static_flag = True
-    if lah:
-        # algo = 'lah_stochastic_gd'
+    if run_cfg.accel:
         algo = 'lah_accel_gd'
     else:
-        algo = 'lm_gd'
+        algo = 'lah_gd'
     workspace = Workspace(algo, run_cfg, static_flag, static_dict, example)
 
     # run the workspace
