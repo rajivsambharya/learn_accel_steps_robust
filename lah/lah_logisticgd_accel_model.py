@@ -75,7 +75,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
 
         self.num_points = num_points
         
-        # self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
+        self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
         
         
     def pepit_nesterov_check(self, params):

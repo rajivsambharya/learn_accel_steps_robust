@@ -1063,7 +1063,12 @@ class Workspace:
             rand_indices = np.arange(N)
             self.train_indices = rand_indices[N_test: N_test + N_train]
             self.test_indices = rand_indices[:N_test]
-            self.val_indices = rand_indices[N_train + N_test:]
+            if 'q_mat_ood' in jnp_load_obj.keys():
+                self.val_indices = rand_indices[N_train + N_test:]
+                self.q_mat_val = thetas[self.val_indices, :]
+            else:
+                self.val = False
+                self.val_indices = None
             # rand_indices = np.random.choice(thetas.shape[0], N, replace=False)
             # self.train_indices = rand_indices[:N_train]
             # self.test_indices = rand_indices[N_train:]
@@ -1071,8 +1076,9 @@ class Workspace:
 
             self.q_mat_train = thetas[self.train_indices, :]
             self.q_mat_test = thetas[self.test_indices, :]
-            self.q_mat_val = thetas[self.val_indices, :]
-
+            
+        # import pdb
+        # pdb.set_trace()
 
         # load the closed_loop_rollout trajectories
         if 'ref_traj_tensor' in jnp_load_obj.keys():
@@ -1303,15 +1309,15 @@ class Workspace:
 
             if self.l2ws_model.algo == 'lah_gd' or self.l2ws_model.algo == 'lah_stochastic_gd':
                 # conj_grad
-                self.eval_iters_train_and_test('conj_grad', None)
+                # self.eval_iters_train_and_test('conj_grad', None)
 
                 # nesterov
-                self.l2ws_model.set_params_for_nesterov()
-                self.eval_iters_train_and_test('nesterov', None)
+                # self.l2ws_model.set_params_for_nesterov()
+                # self.eval_iters_train_and_test('nesterov', None)
 
                 # silver
-                self.l2ws_model.set_params_for_silver()
-                self.eval_iters_train_and_test('silver', None)
+                # self.l2ws_model.set_params_for_silver()
+                # self.eval_iters_train_and_test('silver', None)
 
                 # perturb slightly for training
                 self.l2ws_model.perturb_params()

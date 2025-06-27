@@ -10,6 +10,7 @@ from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 from jaxopt import Bisection
 from functools import reduce
+from lah.pep import create_nesterov_pep_sdp_layer, build_A_matrix_with_xstar, pepit_nesterov, pepit_accel_gd
 
 
 class LAHGDmodel(L2Omodel):
@@ -75,6 +76,7 @@ class LAHGDmodel(L2Omodel):
 
         # end-to-end added fixed warm start eval - bypasses neural network
         # self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
+        self.num_pep_iters = self.train_unrolls
 
         if self.train_unrolls == 1:
             self.train_case = 'one_step_grad'
@@ -82,7 +84,12 @@ class LAHGDmodel(L2Omodel):
             self.train_case = 'two_step_quad'
         elif self.train_unrolls == 3:
             self.train_case = 'three_step_quad'
-            
+    
+    def pepit_nesterov_check(self, params):
+        new_params = np.hstack([params, 0*params])
+        # import pdb
+        # pdb.set_trace()
+        return pepit_accel_gd(self.str_cvx_param._value, self.smooth_param._value, new_params, True, False, 'dist')
     
         
     def pep_cvxpylayer(self, params):
@@ -126,14 +133,15 @@ class LAHGDmodel(L2Omodel):
 
     def perturb_params(self):
         # init step-varying params
-        # noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=1e-5, a_max=1e0)) * 0.01
-        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=-1, a_max=1)) * 0.01
+        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=1e-5, a_max=1e0)) * 0.01
+        noise = jnp.array(np.clip(np.random.normal(size=(self.step_varying_num, 1)), a_min=-3, a_max=3)) * 0.01
         step_varying_params = jnp.log(noise + 2 / (self.smooth_param + self.str_cvx_param)) * jnp.ones((self.step_varying_num, 1))
 
         # init steady_state_params
         steady_state_params = sigmoid_inv(self.smooth_param / (self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 1))
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
+        # pass
 
 
     def set_params_for_nesterov(self):
@@ -163,6 +171,12 @@ class LAHGDmodel(L2Omodel):
     def init_params(self):
         # init step-varying params
         step_varying_params = jnp.log(2 / (self.smooth_param + self.str_cvx_param)) * jnp.ones((self.step_varying_num, 1))
+        # L = self.smooth_param
+        # mu = self.str_cvx_param
+        # k = np.flip(np.arange(self.step_varying_num))
+        # theta = np.pi * (2.0 * k + 1.0) / (2.0 * self.step_varying_num)          # (2k+1)π / (2K)
+        # alpha = 2.0 / ((L + mu) - (L - mu) * np.cos(theta))
+        # step_varying_params = jnp.log(alpha[:,None]) #* jnp.ones((self.step_varying_num, 1))
 
         # init steady_state_params
         steady_state_params = sigmoid_inv(self.smooth_param / (self.smooth_param + self.str_cvx_param)) * jnp.ones((1, 1))

@@ -212,6 +212,10 @@ def pepit_accel_gd(mu, L, params, quad, prox, obj):
     except Exception as e:
         print('exception', e)
         pepit_tau = np.inf
+    if pepit_tau is None:
+        pepit_tau = np.inf
+    # import pdb
+    # pdb.set_trace()
 
     # Print conclusion if required
     verbose = 1
