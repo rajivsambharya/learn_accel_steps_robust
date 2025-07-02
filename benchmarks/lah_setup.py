@@ -9,6 +9,8 @@ import lah.examples.robust_kalman as robust_kalman
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
 import lah.examples.quadcopter as quadcopter
+import matplotlib
+matplotlib.use('pdf')
 
 
 @hydra.main(config_path='configs/markowitz', config_name='markowitz_setup.yaml')

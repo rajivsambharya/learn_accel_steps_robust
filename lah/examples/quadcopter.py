@@ -21,7 +21,7 @@ from scipy.interpolate import splprep, splev
 
 QUADCOPTER_NX = 10
 QUADCOPTER_NU = 4
-
+plt.rcParams['text.usetex'] = False
 
 def run(run_cfg):
     example = "quadcopter"
@@ -1307,10 +1307,14 @@ def plot_traj_3d(state_traj_list, goals, labels, T=10, goal_bound=1, filename=No
         # plt.savefig(f"{filename}_img.pdf")
         # plt.axis('off')
         plt.savefig(f"{filename}_img.pdf", bbox_inches='tight', pad_inches=0)
+        # plt.savefig(f"{filename}_img.png", bbox_inches='tight', pad_inches=0)
         plt.clf()
 
     # create the gif    
     # matplotlib.use('Agg')
+    import matplotlib
+    # # matplotlib.use('png')
+    matplotlib.use('Agg')
     if not os.path.exists(filename):
         os.mkdir(filename)
     if create_gif:
@@ -1347,8 +1351,9 @@ def plot_traj_3d(state_traj_list, goals, labels, T=10, goal_bound=1, filename=No
                 title = 'previous solution'
             elif title[:5] == 'train':
                 title = 'learned'
-            ax.set_title(title)
+            # ax.set_title(title)
             frame_name = f"{filename}/frame_{i}.png"
+            # frame_name = f"{filename}/frame_{i}.pdf"
             filenames.append(frame_name)
             # plt.savefig(frame_name)
             ax.grid(False)

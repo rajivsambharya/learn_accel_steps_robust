@@ -10,6 +10,8 @@ import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
 import lah.examples.quadcopter as quadcopter
 from lah.utils.data_utils import copy_data_file, recover_last_datetime
+import matplotlib
+matplotlib.use('pdf')
 
 
 @hydra.main(config_path='configs/quadcopter', config_name='quadcopter_run.yaml')
@@ -282,7 +284,7 @@ def main_run_robust_kalman_lm(cfg):
         agg_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
         cfg.data.datetime = agg_datetime
     copy_data_file(example, agg_datetime)
-    robust_kalman.run(cfg, lasco=False)
+    robust_kalman.run(cfg, lah=False)
 
 
 if __name__ == '__main__':

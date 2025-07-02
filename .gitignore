@@ -177,3 +177,4 @@ outputs/
 kl_inv_cache/
 lah/examples/mnist_data/
 layers/
+slurm*

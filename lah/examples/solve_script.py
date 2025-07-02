@@ -18,6 +18,7 @@ plt.rcParams.update(
         "font.size": 16,
     }
 )
+plt.rcParams['text.usetex'] = False
 log = logging.getLogger(__name__)
 
 
@@ -365,6 +366,12 @@ def gd_setup_script(c_mat, P, theta_mat, output_filename):
         z_stars=z_stars,
     )
 
+    # save plot of first 5 parameters
+    for i in range(5):
+        plt.plot(theta_mat[i, :])
+    plt.savefig("thetas.pdf")
+    plt.clf()
+
     save_time = time.time()
     log.info(f"finished saving final data... took {save_time-t0}'")
 
@@ -375,11 +382,7 @@ def gd_setup_script(c_mat, P, theta_mat, output_filename):
     plt.clf()
 
 
-    # save plot of first 5 parameters
-    for i in range(5):
-        plt.plot(theta_mat[i, :])
-    plt.savefig("thetas.pdf")
-    plt.clf()
+    
 
 
 def setup_script(q_mat, theta_mat, solver, data, cones_dict, output_filename, ood_num=0, solve=True, save=True):

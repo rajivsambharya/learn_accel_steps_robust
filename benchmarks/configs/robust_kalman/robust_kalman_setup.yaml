@@ -1,5 +1,5 @@
 rollout_length: 100
-num_rollouts: 22
+num_rollouts: 110
 T: 50
 mu: 2
 rho: 2
@@ -13,4 +13,4 @@ w_noise_var: 0.1
 y_noise_var: 0.1
 B_const: 1
 ood_x_shift: 100
-ood_num_rollouts: 2
+ood_num_rollouts: 10
