@@ -9,7 +9,7 @@
 #SBATCH --array=0             # job array with index values 0, 1, 2, 3, 4
 #SBATCH --time=00:59:00          # total run time limit (HH:MM:SS)
 #SBATCH --mail-type=all          # send email on job start, end and fault
-#SBATCH --mail-user=rajivs@princeton.edu # 
+#SBATCH --mail-user=sambhar9@seas.upenn.edu # 
 #SBATCH --gres=gpu:1 
 
 echo "My SLURM_ARRAY_JOB_ID is $SLURM_ARRAY_JOB_ID."

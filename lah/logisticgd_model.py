@@ -1,6 +1,6 @@
 from functools import partial
 
-from lah.algo_steps_logistic import k_steps_eval_logisticgd, k_steps_train_logisticgd
+from lah.algo_steps_logistic import k_steps_eval_logisticgd, k_steps_train_logisticgd, k_steps_eval_nesterov_l2ws_logisticgd, k_steps_train_nesterov_l2ws_logisticgd
 from lah.l2o_model import L2Omodel
 import jax.numpy as jnp
 import numpy as np
@@ -44,7 +44,9 @@ class LOGISTICGDmodel(L2Omodel):
 
         gd_step = 1 / self.smooth_param
 
-        self.k_steps_eval_fn = partial(k_steps_eval_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
-        self.k_steps_train_fn = partial(k_steps_train_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
+        # self.k_steps_eval_fn = partial(k_steps_eval_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
+        # self.k_steps_train_fn = partial(k_steps_train_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
+        self.k_steps_eval_fn = partial(k_steps_eval_nesterov_l2ws_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
+        self.k_steps_train_fn = partial(k_steps_train_nesterov_l2ws_logisticgd, num_points=num_points, gd_step=gd_step, jit=self.jit)
         self.out_axes_length = 5
         self.lah = False

@@ -19,20 +19,21 @@ import matplotlib as mpl
 from matplotlib.ticker import MaxNLocator
 import matplotlib.ticker as ticker
 
+FONT_SIZE = 36 # 38
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",   # For talks, use sans-serif
     # "font.size": 38,
     # "axes.titlesize": 34,
     # "font.titlesize": 33
-    "axes.labelsize": 38,
-    "axes.titlesize": 38
+    "axes.labelsize": FONT_SIZE,
+    "axes.titlesize": FONT_SIZE
     # "font.size": 30,
     # "font.size": 16,
 })
 # Optional: give ticks their own family
-plt.rc("xtick", labelsize=38, labelcolor="black")
-plt.rc("ytick", labelsize=38, labelcolor="black")
+plt.rc("xtick", labelsize=FONT_SIZE, labelcolor="black")
+plt.rc("ytick", labelsize=FONT_SIZE, labelcolor="black")
 import os
 import re
 cmap = plt.cm.Set1
@@ -728,27 +729,65 @@ def create_acc_reduction_tables(accs_dict, acc_reductions_dict, split='test'):
 
 
 
+# def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
+#     # plot the primal and dual residuals next to each other
+#     # fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 12), sharey='row') #, sharey=True)
+#     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 6), sharey='row') #, sharey=True)
+
+#     axes[0].set_yscale('log')
+#     axes[1].set_yscale('log')
+#     axes[0].set_xlabel('iterations')
+#     axes[1].set_xlabel('iterations')
+#     axes[0].set_title('primal residuals')
+#     axes[1].set_title('dual residuals')
+
+#     axes[0].set_ylabel('residual value')
+
+#     methods = list(results_dict.keys())
+#     markevery = int(num_iters / 20)
+#     for i in range(len(methods)):
+#         method = methods[i]
+#         if method == 'lm' and 'lm10000' in methods:
+#             continue
+#         if method == 'l2ws' and 'l2ws10000' in methods:
+#             continue
+
+#         style = titles_2_styles[method]
+#         marker = titles_2_markers[method]
+#         color = titles_2_colors[method]
+#         mark_start = titles_2_marker_starts[method]
+
+#         # plot the values
+#         axes[0].plot(results_dict[method]['pr'][:num_iters], linestyle=style, marker=marker, color=color, 
+#                                 markevery=(0, 3))
+#         axes[1].plot(results_dict[method]['dr'][:num_iters], linestyle=style, marker=marker, color=color, 
+#                                 markevery=(0, 3))
+        
+#     fig.tight_layout()
+#     plt.savefig('pr_dr.pdf', bbox_inches='tight')
+
 def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
-    # plot the primal and dual residuals next to each other
-    # fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 12), sharey='row') #, sharey=True)
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 6), sharey='row') #, sharey=True)
+    # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
+    plt.figure(figsize=(12, 6))
+    plt.yscale('log')
+    plt.xlabel('iterations')
+    plt.title('maximum of primal and dual residual')
 
-    axes[0].set_yscale('log')
-    axes[1].set_yscale('log')
-    axes[0].set_xlabel('iterations')
-    axes[1].set_xlabel('iterations')
-    axes[0].set_title('primal residuals')
-    axes[1].set_title('dual residuals')
-
-    axes[0].set_ylabel('residual value')
+    # plt.ylabel('objective suboptimality')
+    # axes[1].set_ylabel('gain to vanilla')
 
     methods = list(results_dict.keys())
     markevery = int(num_iters / 20)
+
     for i in range(len(methods)):
         method = methods[i]
+        
+
         if method == 'lm' and 'lm10000' in methods:
             continue
-        if method == 'l2ws' and 'l2ws10000' in methods:
+        if method == 'l2ws': # or and 'l2ws10000' in methods:
+            continue
+        if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
             continue
 
         style = titles_2_styles[method]
@@ -757,19 +796,19 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
         mark_start = titles_2_marker_starts[method]
 
         # plot the values
-        axes[0].plot(results_dict[method]['pr'][:num_iters], linestyle=style, marker=marker, color=color, 
-                                markevery=(0, 3))
-        axes[1].plot(results_dict[method]['dr'][:num_iters], linestyle=style, marker=marker, color=color, 
-                                markevery=(0, 3))
+        # pr = results_dict[method]['pr'][:num_iters]
+        # dr = results_dict[method]['pr'][:num_iters]
+        pr_dr_max = results_dict[method]['pr_dr_max'][:num_iters]
+        plt.plot(pr_dr_max, linestyle=style, marker=marker, color=color,  markevery=(0, 3))
+                                    # markevery=(mark_start, markevery))
         
-        # plot the gains
-        # axes[1, 0].plot(gains_dict[method]['pr'][:num_iters], linestyle=style, marker=marker, color=color, 
-        #                         markevery=(mark_start, markevery))
-        # axes[1, 1].plot(gains_dict[method]['dr'][:num_iters], linestyle=style, marker=marker, color=color, 
-        #                         markevery=(mark_start, markevery))
-
-    fig.tight_layout()
-    plt.savefig('pr_dr.pdf', bbox_inches='tight')
+    # plt.locator_params(axis="y", nbins=5)   # works on the current Axes
+    # plt.locator_params(numticks=5)
+    # plt.gca().yaxis.set_major_locator(MaxNLocator(numticks=5))
+    plt.gca().yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
+    plt.tight_layout()
+    plt.savefig('pr_dr_max.pdf', bbox_inches='tight')
+    plt.clf()
 
 
 def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters, split='test'):

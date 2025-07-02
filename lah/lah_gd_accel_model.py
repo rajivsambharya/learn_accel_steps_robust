@@ -92,8 +92,6 @@ class LAHAccelGDmodel(L2Omodel):
         # self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
         # self.pep_layer = create_nesterov_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
         self.pep_layer = create_quad_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
-        # import pdb
-        # pdb.set_trace()
 
         
     def pepit_nesterov_check(self, params):

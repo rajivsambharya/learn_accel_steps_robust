@@ -40,7 +40,8 @@ def run(run_cfg, model='lah'):
     # we directly save q now
     static_flag = True
     if model == 'lah':
-        algo = 'lah_accel_logisticgd' #'lah_logisticgd' #'lah_accel_logisticgd'
+        algo = 'lah_accel_logisticgd'
+        # algo = 'lah_accel_logisticgd' #'lah_logisticgd' #'lah_accel_logisticgd'
     elif model == 'l2ws':
         algo = 'logisticgd'
     else:

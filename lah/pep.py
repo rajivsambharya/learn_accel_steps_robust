@@ -16,6 +16,96 @@ import dill
 import os
 import hydra
 
+def pepit_fixed_point_anderson(params):
+    """
+    Performance estimation for a multi-tap accelerated fixed-point scheme.
+
+    Parameters
+    ----------
+    params : (num_iters, H+1) ndarray or list
+        params[k, 0] = α_k   (relaxation / averaged size)
+        params[k, 1:] = β_k  (length-H momentum vector for iteration k)
+
+    Returns
+    -------
+    pepit_tau : float
+        Worst-case bound returned by PEPit.
+    """
+    params = np.asarray(params, dtype=float)
+    num_iters, cols = params.shape
+    H = cols - 1                         # number of momentum taps
+
+    alpha_vals = params[:, 0]            # shape (num_iters,)
+    beta_vals  = params[:, 1:]           # shape (num_iters, H)
+
+    # ---------------------------------------------------------------------
+    # 1. Build the PEP
+    # ---------------------------------------------------------------------
+    problem = PEP()
+
+    # Declare a 1-Lipschitz operator A (non-expansive fixed-point map)
+    A = problem.declare_function(LipschitzOperator, L=1.)
+
+    # Fixed point x_* and initial iterate x_0
+    xs, _, _ = A.fixed_point()
+    x0 = problem.set_initial_point()
+    problem.set_initial_condition((x0 - xs) ** 2 <= 1)
+
+    # ---------------------------------------------------------------------
+    # 2. Run the algorithm inside the PEP
+    # ---------------------------------------------------------------------
+    y = x0                   # extrapolated iterate
+    past_x = []              # store past x_{k} (newest last)
+
+    for k in range(num_iters):
+        alpha_k = alpha_vals[k]
+        x_new = (1 - alpha_k) * y + alpha_k * A.gradient(y)
+
+        Hk = min(H, len(past_x))        # history length actually available
+        if Hk:
+            # -----------------------------------------------------------------
+            # Option 1 – keep using sum, but supply a Point-zero as the start:
+            # -----------------------------------------------------------------
+            zero_pt = 0 * (x_new - x_new)          #   0 · Point  →  Point(0)
+            momentum = sum(
+                (beta_vals[k, h - 1] * (x_new - past_x[-h])
+                for h in range(1, Hk + 1)),
+                zero_pt
+            )
+            # momentum = sum(
+            #     (beta_vals[k, h] * (x_new - past_x[-h])
+            #     for h in range(0, Hk)),
+            #     zero_pt
+            # )
+
+            # -----------------------------------------------------------------
+            # Option 2 – or build the list and reduce:
+            # -----------------------------------------------------------------
+            # terms = [beta_vals[k, h-1]*(x_new - past_x[-h])
+            #          for h in range(1, Hk+1)]
+            # momentum = reduce(lambda a, b: a + b, terms)
+
+            y = x_new + momentum
+        else:
+            y = x_new                     # first iteration: no momentum
+
+        past_x.append(x_new)
+        if len(past_x) > H:
+            past_x.pop(0)
+
+    # ---------------------------------------------------------------------
+    # 3. Performance metric and solve
+    # ---------------------------------------------------------------------
+    problem.set_performance_metric((y - A.gradient(y)) ** 2)
+
+    try:
+        pepit_tau = problem.solve(verbose=0, solver=cp.MOSEK)
+    except Exception as e:
+        print("PEPit solve failed:", e)
+        pepit_tau = np.nan
+
+    return pepit_tau
+
 
 def pepit_fixed_point(params):
     num_iters = params[:,0].size

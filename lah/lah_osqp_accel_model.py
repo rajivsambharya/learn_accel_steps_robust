@@ -8,6 +8,7 @@ from scipy.sparse import csc_matrix
 
 from lah.algo_steps_osqp import k_steps_eval_lah_osqp, k_steps_train_lah_osqp, unvec_symm, k_steps_eval_osqp, k_steps_train_osqp
 from lah.l2o_model import L2Omodel
+from lah.pep import create_admm_pep_sdp_layer, pepit_fixed_point, build_A_matrix_op_with_xstar
 
 
 class LAHAccelOSQPmodel(L2Omodel):
@@ -82,27 +83,26 @@ class LAHAccelOSQPmodel(L2Omodel):
         self.out_axes_length = 6
         N = self.q_mat_train.shape[0]
         self.lah_train_inputs = jnp.zeros((N, self.n + self.m))
+        self.num_pep_iters = self.train_unrolls
+        self.pep_layer = create_admm_pep_sdp_layer(self.num_pep_iters)
 
 
     def init_params(self):
         # init step-varying params
         step_varying_params = jnp.zeros((self.step_varying_num, 5))
-        # step_varying_params = step_varying_params.at[:,1].set(jnp.log(0.1))
-        # step_varying_params = step_varying_params.at[:,2].set(jnp.log(1.6))
-        step_varying_params = step_varying_params.at[:,3].set(-20)
+        # step_varying_params = step_varying_params.at[:,3].set(-20)
+        step_varying_params = step_varying_params.at[:,2].set(1)
+        step_varying_params = step_varying_params.at[:,3].set(0)
         # step_varying_params = step_varying_params.at[:,4].set(0)
         # step_varying_params = step_varying_params.at[:,4].set(jnp.log(100))
         # step_varying_params = step_varying_params.at[:,0].set(jnp.log(1e-6))
 
         # init steady_state_params
         steady_state_params = jnp.zeros((1, 5))
-        # steady_state_params = steady_state_params.at[:,1].set(jnp.log(0.1))
-        # steady_state_params = steady_state_params.at[:,2].set(jnp.log(1.6))
-        steady_state_params = steady_state_params.at[:,3].set(-20)
-        # steady_state_params = steady_state_params.at[:,4].set(5)
-        # steady_state_params = steady_state_params.at[:,4].set(jnp.log(100))
-        # step_varying_params = step_varying_params.at[:,0].set(jnp.log(1e-6))
-        # steady_state_params = steady_state_params.at[:,1].set(-2)
+        # steady_state_params = steady_state_params.at[:,3].set(-20)
+        steady_state_params = steady_state_params.at[:,2].set(1)
+        steady_state_params = steady_state_params.at[:,3].set(0)
+
 
         self.params = [jnp.vstack([step_varying_params, steady_state_params])]
         # self.mean_params = jnp.ones((self.train_unrolls, 3))
@@ -113,6 +113,27 @@ class LAHAccelOSQPmodel(L2Omodel):
         # self.prior_param = jnp.log(self.init_var) * jnp.ones(2)
 
         # self.params = [self.mean_params, self.sigma_params, self.prior_param]
+
+    def pep_cvxpylayer(self, params):
+        step_sizes = jnp.log(params[:self.num_pep_iters,2])
+        momentum_sizes = jnp.log(params[:self.num_pep_iters,3])
+        
+        A_param = build_A_matrix_op_with_xstar(step_sizes, momentum_sizes)
+        G, = self.pep_layer(A_param, solver_args={"solve_method": "SCS", "verbose": True})
+        k = self.num_pep_iters
+
+
+        return G[2*k+2, 2*k+2] - 2*G[2*k+2, k+2] + G[k+2, k+2]
+    
+    def pepit_nesterov_check(self, params):
+        fp_params = np.vstack([jnp.log(params[:, 2]), jnp.log(params[:, 3])]).T
+        return pepit_fixed_point(fp_params)
+
+    def transform_params(self, params, n_iters):
+        transformed_params = jnp.exp(params[0][:n_iters, :])
+        transformed_params = transformed_params.at[:,2].set(jnp.log(transformed_params[:,2]))
+        transformed_params = transformed_params.at[:,3].set(jnp.log(transformed_params[:,3]))
+        return transformed_params
     
     def perturb_params(self):
         step_varying_params = self.params[0][:-1, :]

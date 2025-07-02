@@ -25,9 +25,9 @@ def k_steps_eval_lah_accel_scs(k, z0, q, params, proj, P, A, idx_mapping, superv
     primal_residuals, dual_residuals = jnp.zeros(k), jnp.zeros(k)
     m, n = A.shape
     scalar_params, all_factors, scaled_vecs = params[0], params[1], params[2]
-    alphas = jnp.exp(scalar_params[:, 2])
+    alphas = scalar_params[:, 2] #jnp.exp(scalar_params[:, 2])
     tau_factors = scalar_params[:, 3] #jnp.exp(scalar_params[:, 3])
-    betas = jnp.exp(scalar_params[:, 4])
+    betas = scalar_params[:, 4] #jnp.exp(scalar_params[:, 4])
     factors1, factors2 = all_factors
     verbose = not jit
     # import pdb
@@ -86,8 +86,11 @@ def fp_eval_lah_accel_scs(i, val, q_r, z_star, all_factors, proj, P, A, idx_mapp
     r = q_r
     factors1, factors2 = all_factors
     idx = idx_mapping[i]
+    # z_next, y_curr, u, u_tilde, v = fixed_point_hsde(
+    #     z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx],
+    #     verbose=verbose)
     z_next, y_curr, u, u_tilde, v = fixed_point_hsde(
-        z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx],
+        z, y_prev, homogeneous, r, factors1, factors2, proj, scaled_vecs, alphas[idx], betas[idx],
         verbose=verbose)
     # z0 = 0 * z_peaceman
     # z0 = z0.at[-1].set(1)
@@ -130,9 +133,9 @@ def k_steps_train_lah_accel_scs(k, z0, q, params, P, A, idx_mapping, supervised,
     # scale_vec = get_scale_vec(rho_x, scale, m, n, zero_cone_size, hsde=hsde)
 
     scalar_params, all_factors, scaled_vecs = params[0], params[1], params[2]
-    alphas = jnp.exp(scalar_params[:, 2])
+    alphas = scalar_params[:, 2] #jnp.exp(scalar_params[:, 2])
     tau_factors = scalar_params[:, 3]
-    betas = jnp.exp(scalar_params[:, 4])
+    betas = scalar_params[:, 4] #jnp.exp(scalar_params[:, 4])
     factors1, factors2 = all_factors
 
     fp_train_partial = partial(fp_train_lah_accel_scs, q_r=q, all_factors=all_factors,
@@ -177,8 +180,8 @@ def fp_train_lah_accel_scs(i, val, q_r, all_factors, P, A, idx_mapping, supervis
     #                                          factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], tau_factors[idx])
     # z_next = alphas[idx] * z_prev + betas[idx] * z + (1 - alphas[idx] - betas[idx]) * z_peaceman
     
-    z_next, y, u, u_tilde, v = fixed_point_hsde(
-        z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx])
+    # z_next, y, u, u_tilde, v = fixed_point_hsde(z, y_prev, homogeneous, r, factors1[idx, :, :], factors2[idx, :], proj, scaled_vecs[idx, :], alphas[idx], betas[idx])
+    z_next, y, u, u_tilde, v = fixed_point_hsde(z, y_prev, homogeneous, r, factors1, factors2, proj, scaled_vecs, alphas[idx], betas[idx])
     
     # add acceleration
     # z_next = (1 - betas[i, 0]) * z_next + betas[i, 0] * z
@@ -638,7 +641,8 @@ def fixed_point_hsde(z_init, y_prev, homogeneous, r, factor1, factor2, proj, sca
     
     # beta = 0
     # z = z + beta * (z - z_prev)
-    z = (1 - beta) * y + beta * y_prev
+    # z = (1 - beta) * y + beta * y_prev
+    z = y + beta * (y - y_prev)
 
     # for s extraction - not needed for algorithm
     full_scaled_vec = jnp.concatenate([scale_vec, jnp.array([tau_factor])])

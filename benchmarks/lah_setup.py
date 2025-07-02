@@ -118,7 +118,8 @@ def main_setup_opf(cfg):
 
 if __name__ == '__main__':
     if sys.argv[2] == 'cluster':
-        base = 'hydra.run.dir=/scratch/gpfs/rajivs/learn2warmstart/outputs/'
+        # base = 'hydra.run.dir=/scratch/gpfs/rajivs/learn2warmstart/outputs/'
+        base = 'hydra.run.dir=/scratch/sambhar9/lah_robust/outputs/'
     elif sys.argv[2] == 'local':
         base = 'hydra.run.dir=outputs/'
     if sys.argv[1] == 'markowitz':

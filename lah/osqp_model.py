@@ -20,9 +20,9 @@ class OSQPmodel(L2Omodel):
         self.m, self.n = input_dict['m'], input_dict['n']
         self.q_mat_train, self.q_mat_test = input_dict['q_mat_train'], input_dict['q_mat_test']
 
-        self.rho = input_dict['rho']
-        self.sigma = input_dict.get('sigma', 1)
-        self.alpha = input_dict.get('alpha', 1)
+        self.rho = 1 #input_dict['rho']
+        self.sigma = 1 #input_dict.get('sigma', 1)
+        self.alpha = 1 #input_dict.get('alpha', 1)
         self.output_size = self.n + self.m
 
         # custom_loss

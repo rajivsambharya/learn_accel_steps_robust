@@ -17,6 +17,7 @@ from lah.algo_steps import (
 )
 from lah.algo_steps_scs import k_steps_eval_lah_accel_scs, k_steps_train_lah_accel_scs
 from lah.l2o_model import L2Omodel
+from lah.pep import create_admm_pep_sdp_layer, pepit_fixed_point, build_A_matrix_op_with_xstar
 
 
 class LAHAccelSCSmodel(L2Omodel):
@@ -76,7 +77,34 @@ class LAHAccelSCSmodel(L2Omodel):
                                        hsde=True,
                                        custom_loss=custom_loss,
                                        lightweight=lightweight)
+        self.num_pep_iters = self.train_unrolls
+        self.pep_layer = create_admm_pep_sdp_layer(self.num_pep_iters)
+    
+    def transform_params(self, params, n_iters):
+        transformed_params = jnp.exp(params[0][:n_iters, :])
+        transformed_params = transformed_params.at[:,4].set(-jnp.log(transformed_params[:,4]))
+        transformed_params = transformed_params.at[:,2].set(jnp.log(transformed_params[:,2]))
+        return transformed_params
         
+
+    def pep_cvxpylayer(self, params):
+        step_sizes = jnp.log(params[:self.num_pep_iters,2])
+        momentum_sizes = jnp.log(params[:self.num_pep_iters,4])
+        
+        
+        A_param = build_A_matrix_op_with_xstar(step_sizes, momentum_sizes)
+        G, = self.pep_layer(A_param, solver_args={"solve_method": "SCS", "verbose": True})
+        k = self.num_pep_iters
+        # import pdb
+        # pdb.set_trace()
+
+        return G[2*k+2, 2*k+2] - 2*G[2*k+2, k+2] + G[k+2, k+2]
+
+    def pepit_nesterov_check(self, params):
+        # import pdb
+        # pdb.set_trace()
+        fp_params = np.vstack([jnp.log(params[:, 2]), jnp.log(params[:, 4])]).T
+        return pepit_fixed_point(fp_params)
         
         
     def init_params(self):
@@ -85,17 +113,19 @@ class LAHAccelSCSmodel(L2Omodel):
         # self.mean_params = self.mean_params.at[:, 4].set(-2.0)
         
         # do alpha
-        alpha = jnp.log(1) #jnp.log(.0001)
+        alpha = 1 #jnp.log(1) #jnp.log(.0001)
         self.mean_params = self.mean_params.at[:, 2].set(alpha)
         
         # do beta
-        beta = .01 * jnp.ones(self.eval_unrolls)
+        beta = 0.0 * jnp.ones(self.eval_unrolls)
+        # beta = jnp.array(np.random.normal(size=(self.eval_unrolls)))
         # t = 1
         # for i in range(0, self.eval_unrolls):
         #     beta = beta.at[i].set(1/(i+2)) #(jnp.log(t))
 
         # beta = beta.at[:, 1].set(jnp.log(t_params))
-        self.mean_params = self.mean_params.at[:, 4].set(jnp.log(beta))
+        self.mean_params = self.mean_params.at[:, 4].set(beta)
+        # self.mean_params = self.mean_params.at[:, 4].set(jnp.log(beta))
         # self.mean_params = self.mean_params.at[-1, 4].set(0)
         self.params = [self.mean_params]
 
@@ -156,31 +186,39 @@ class LAHAccelSCSmodel(L2Omodel):
 
             rho_xs, rho_ys, rho_ys_zero = params[0][:, 0], params[0][:, 1], params[0][:, 3]
             
-            
-            for i in range(n_iters):
-                # rho_x = jnp.exp(rho_xs[0])
-                # rho_y = jnp.exp(rho_ys[0])
-                rho_x, rho_y = jnp.exp(rho_xs[0]), jnp.exp(rho_ys[0])
-                rho_y_zero = jnp.exp(rho_ys_zero[0])
-                
-                factor, scale_vec = get_scaled_vec_and_factor(self.M, rho_x, rho_y, 
+            rho_x, rho_y = jnp.exp(rho_xs[0]), jnp.exp(rho_ys[0])
+            rho_y_zero = jnp.exp(rho_ys_zero[0])
+            factor, scale_vec = get_scaled_vec_and_factor(self.M, rho_x, rho_y, 
                                                               rho_x,
                                                               self.m, self.n, 
                                                               zero_cone_size=self.zero_cone_size, 
                                                               hsde=False)
-                
-                factors1 = factors1.at[i, :, :].set(factor[0])
-                factors2 = factors2.at[i, :].set(factor[1])
-                scaled_vecs = scaled_vecs.at[i, :].set(scale_vec)
-                print('factor', scale_vec)
 
-            params[0] = params[0].at[-1, 2].set(0)
-            # params[0] = params[0].at[:, 2].set(0)
-            params[0] = params[0].at[-1, 4].set(-10)
-            all_factors = factors1, factors2
-            # scs_params = (params[0][:n_iters, :], all_factors, scaled_vecs)
-            scs_params = (params[0][:, :], all_factors, scaled_vecs)
             
+            # for i in range(n_iters):
+            #     # rho_x = jnp.exp(rho_xs[0])
+            #     # rho_y = jnp.exp(rho_ys[0])
+            #     rho_x, rho_y = jnp.exp(rho_xs[0]), jnp.exp(rho_ys[0])
+            #     rho_y_zero = jnp.exp(rho_ys_zero[0])
+                
+            #     factor, scale_vec = get_scaled_vec_and_factor(self.M, rho_x, rho_y, 
+            #                                                   rho_x,
+            #                                                   self.m, self.n, 
+            #                                                   zero_cone_size=self.zero_cone_size, 
+            #                                                   hsde=False)
+                
+            #     factors1 = factors1.at[i, :, :].set(factor[0])
+            #     factors2 = factors2.at[i, :].set(factor[1])
+            #     scaled_vecs = scaled_vecs.at[i, :].set(scale_vec)
+            #     print('factor', scale_vec)
+
+            # params[0] = params[0].at[-1, 2].set(0)
+            # params[0] = params[0].at[:, 2].set(0)
+            # params[0] = params[0].at[-1, 4].set(-10)
+            # all_factors = factors1, factors2
+            # scs_params = (params[0][:n_iters, :], all_factors, scaled_vecs)
+            # scs_params = (params[0][:, :], all_factors, scaled_vecs)
+            scs_params = (params[0][:, :], factor, scale_vec)
 
             if diff_required:
                 z_final, iter_losses = train_fn(k=iters,

@@ -726,6 +726,8 @@ class Workspace:
                                         y_stars_test=self.y_stars_test,
                                         regression=cfg.get(
                                             'supervised', False),
+                                        pep_regularizer_coeff=cfg.get('pep_regularizer_coeff', None),
+                                        pep_target=cfg.get('pep_target', None),
                                         nn_cfg=cfg.nn_cfg,
                                         loss_method=cfg.loss_method,
                                         algo_dict=algo_dict)
@@ -826,6 +828,8 @@ class Workspace:
                                     test_inputs=self.test_inputs,
                                     regression=cfg.supervised,
                                     nn_cfg=cfg.nn_cfg,
+                                    pep_regularizer_coeff=cfg.get('pep_regularizer_coeff', None),
+                                    pep_target=cfg.get('pep_target', None),
                                     z_stars_train=self.z_stars_train,
                                     z_stars_test=self.z_stars_test,
                                     algo_dict=input_dict)
@@ -1341,7 +1345,7 @@ class Workspace:
             # prev sol eval
             if 'lah' in self.l2ws_model.algo and self.prev_sol_eval and self.l2ws_model.z_stars_train is not None:
                 self.eval_iters_train_and_test('prev_sol', None)
-                self.l2ws_model.perturb_params()
+                # self.l2ws_model.perturb_params()
 
         
 

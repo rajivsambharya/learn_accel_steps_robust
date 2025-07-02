@@ -319,8 +319,8 @@ def k_steps_eval_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_sta
     z_init = z_init.at[m + n:].set(w)
 
     scalar_params, all_factors, rho_vec = params[0], params[1], params[2]
-    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), jnp.exp(scalar_params[:, 2])
-    betas = jnp.exp(scalar_params[:, 3])
+    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), scalar_params[:, 2]
+    betas = scalar_params[:, 3] #jnp.exp(scalar_params[:, 3])
     rho_vecs = rho_vec
     # import pdb
     # pdb.set_trace()
@@ -365,8 +365,8 @@ def k_steps_train_lah_osqp(k, z0, q, params, P, A, idx_mapping, supervised, z_st
     z_init = z_init.at[m + n:].set(w)
 
     scalar_params, all_factors, rho_vec = params[0], params[1], params[2]
-    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), jnp.exp(scalar_params[:, 2])
-    betas = jnp.exp(scalar_params[:, 3])
+    rhos, sigmas, alphas = jnp.exp(scalar_params[:, 0]), jnp.exp(scalar_params[:, 1]), scalar_params[:, 2]
+    betas = scalar_params[:, 3] #jnp.exp(scalar_params[:, 3])
     rho_vecs = rho_vec
     
     fp_train_partial = partial(fp_train_lah_osqp,
