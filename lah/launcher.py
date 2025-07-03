@@ -1300,9 +1300,9 @@ class Workspace:
 
             # if self.l2ws_model.lah:
             # nearest neighbor
-            self.eval_iters_train_and_test('nearest_neighbor', None)
-            # if self.l2ws_model.lah:
-            #     self.eval_iters_train_and_test('nearest_neighbor', None)
+            # self.eval_iters_train_and_test('nearest_neighbor', None)
+            if self.l2ws_model.lah:
+                self.eval_iters_train_and_test('nearest_neighbor', None)
             #     jax.clear_caches()
 
             # if self.l2ws_model.algo == 'lah_ista':
@@ -1390,8 +1390,6 @@ class Workspace:
                 # snap = tracemalloc.take_snapshot()  # current state
                 # for stat in snap.statistics('lineno')[:10]:
                 #     print(f"{stat.size/1024:8.1f} KiB  {stat.traceback}")
-                # import pdb
-                # pdb.set_trace()
                 epoch = int(epoch_batch * self.epochs_jit) + window * num_epochs_jit * self.epochs_jit
                 print('epoch', epoch)
 
@@ -1409,8 +1407,6 @@ class Workspace:
                 permutation = setup_permutation(
                     self.key_count, self.l2ws_model.N_train, self.epochs_jit)
                 
-                # import pdb
-                # pdb.set_trace()
                 prev_params = self.l2ws_model.params[0]
 
                 # train the jitted epochs
@@ -1689,15 +1685,13 @@ class Workspace:
             #     q_mat = self.q_mat_val
 
         z0_inits = self.get_inputs_for_eval(fixed_ws, num, train, col)
-        # import pdb
-        # pdb.set_trace()
+
 
         # do the batching
         num_batches = int(num / batch_size)
         full_eval_out = []
         key = 64 if col == 'silver' else 1 + self.l2ws_model.step_varying_num
-        # import pdb
-        # pdb.set_trace()
+
 
         if num_batches <= 1:
             eval_out = self.l2ws_model.evaluate(
