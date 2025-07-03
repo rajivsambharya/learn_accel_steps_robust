@@ -61,7 +61,7 @@ class LMSCSmodel(L2Omodel):
                                         jit=self.jit,
                                         P=self.P,
                                         A=self.A,
-                                        hsde=False)
+                                        hsde=True)
         # self.k_steps_train_fn2 = partial(k_steps_train_lm_scs, proj=self.proj,
         #                                 jit=self.jit,
         #                                 P=self.P,
@@ -71,7 +71,7 @@ class LMSCSmodel(L2Omodel):
                                        P=self.P, A=self.A,
                                        zero_cone_size=self.zero_cone_size,
                                        jit=self.jit,
-                                       hsde=False,
+                                       hsde=True,
                                        custom_loss=custom_loss,
                                        lightweight=lightweight)
         self.lm = True
