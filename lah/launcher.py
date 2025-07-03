@@ -1061,6 +1061,7 @@ class Workspace:
             else:
                 self.val = False
                 self.val_indices = None
+            
 
         else:
             thetas = jnp.array(jnp_load_obj['thetas'])
