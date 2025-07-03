@@ -1452,7 +1452,7 @@ class Workspace:
                     plot_train_test_losses(self.l2ws_model.tr_losses_batch,
                                         self.l2ws_model.te_losses,
                                         self.l2ws_model.num_batches, self.epochs_jit)
-            if self.l2ws_model.accel:
+            if self.l2ws_model.accel is not None and self.l2ws_model.accel:
                 break # no progressive training
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
         self.get_confidence_bands()            
