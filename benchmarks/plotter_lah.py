@@ -1039,19 +1039,35 @@ def populate_curr_method_dict(method, example, cfg, constrained, split='test'):
         primal_residuals = recover_data(example, dt, f'primal_residuals_{split}.csv', col)
         dual_residuals = recover_data(example, dt, f'dual_residuals_{split}.csv', col)
         pr_dr_maxes = recover_data(example, dt, f'pr_dr_max_{split}.csv', col)
+        pr_dr_maxes = pr_dr_maxes.fillna(method="ffill")
         # dist_opts = recover_data(example, dt, f'dist_opts_df_{split}.csv', col)
 
         curr_method_dict = {
             'pr': np.clip(primal_residuals, a_min=cfg.get('minval', 1e-10), a_max=1e5),
             'dr': np.clip(dual_residuals, a_min=cfg.get('minval', 1e-10), a_max=1e5),
-            'pr_dr_max': pr_dr_maxes
+            'pr_dr_max': forward_fill_nan(pr_dr_maxes)
         }
     else:
         obj_diffs = recover_data(example, dt, f'obj_vals_diff_{split}.csv', col)
         curr_method_dict = {'obj_diff': obj_diffs}
-
+    # import pdb
+    # pdb.set_trace()
     return curr_method_dict
 
+def forward_fill_nan(x: np.ndarray) -> np.ndarray:
+    """
+    Replace each NaN in a 1-D array with the previous
+    non-NaN value (in-place; returns the filled view).
+    """
+    if x.ndim != 1:
+        raise ValueError("Input must be 1-D")
+
+    n = x.size
+    mask = np.isnan(x)                     # True where NaN
+    idx  = np.where(mask, 0, np.arange(n)) # indices of valid values
+    np.maximum.accumulate(idx, out=idx)    # nearest previous valid index
+    x[mask] = x[idx[mask]]                 # fill
+    return x
 
 def recover_data(example, dt, filename, col, min_val=1e-12):
     orig_cwd = hydra.utils.get_original_cwd()

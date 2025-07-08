@@ -79,7 +79,8 @@ class LAHSCSmodel(L2Omodel):
         
         
     def init_params(self):
-        self.mean_params = -0*jnp.ones((self.eval_unrolls, 5))
+        # self.mean_params = -0*jnp.ones((self.eval_unrolls, 5))
+        self.mean_params = -0*jnp.ones((self.train_unrolls+1, 5))
         # self.mean_params = self.mean_params.at[10:20, :].set(1*jnp.ones((10, 5)))
         self.params = [self.mean_params]
 

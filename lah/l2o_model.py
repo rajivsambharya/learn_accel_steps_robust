@@ -140,6 +140,7 @@ class L2Omodel(object):
             else:
                 eval_fn = self.k_steps_eval_fn
 
+
             if diff_required:
                 if self.factors_required:
                     z_final, iter_losses = train_fn(k=iters,
@@ -190,22 +191,36 @@ class L2Omodel(object):
 
         key = n_iters #1 if params[0].shape[0] == 0 else self.train_unrolls #state.iter_num
 
-        # gradient-based methods
-        results = self.optimizer.update(params=params,
-                                        state=state,
-                                        inputs=batch_inputs,
-                                        b=batch_q_data,
-                                        iters=self.train_unrolls,
-                                        z_stars=batch_z_stars,
-                                        key=key)
+        if self.factors_required and not self.factor_static_bool:
+            # for only the case where the factors are needed
+            # batch_factors = self.factors[batch_indices, :, :]
+            batch_factors = (self.factors_train[0][batch_indices,
+                             :, :], self.factors_train[1][batch_indices, :])
+            results = self.optimizer.update(params=params,
+                                            state=state,
+                                            inputs=batch_inputs,
+                                            b=batch_q_data,
+                                            iters=self.train_unrolls,
+                                            z_stars=batch_z_stars,
+                                            key=key,
+                                            factors=batch_factors)
+        else:
+            # gradient-based methods
+            results = self.optimizer.update(params=params,
+                                            state=state,
+                                            inputs=batch_inputs,
+                                            b=batch_q_data,
+                                            iters=self.train_unrolls,
+                                            z_stars=batch_z_stars,
+                                            key=key)
         params, state = results
         self.key = key
         print('params', params)
         return state.value, params, state
 
     def evaluate(self, k, inputs, b, z_stars, fixed_ws, key, factors=None, tag='test', light=False):
-        return self.static_eval(k, inputs, b, z_stars, key, tag=tag, 
-                                    fixed_ws=fixed_ws, light=light)
+        # return self.static_eval(k, inputs, b, z_stars, key, tag=tag, 
+        #                             fixed_ws=fixed_ws, light=light)
         if self.factors_required and not self.factor_static_bool:
             return self.dynamic_eval(k, inputs, b, z_stars, 
                                      factors=factors, key=self.key, tag=tag, fixed_ws=fixed_ws)
@@ -313,20 +328,31 @@ class L2Omodel(object):
         if not hasattr(self, 'num_const_steps'):
             self.num_const_steps = 1
 
-        if self.lah:
-            self.state = self.optimizer.init_state(init_params=[self.params[0][:int(self.train_unrolls / self.num_const_steps), :]],
-                                                   inputs=input_init,
-                                                   b=q_init,
-                                                   iters=self.train_unrolls,
-                                                   z_stars=z_stars_init,
-                                                   key=self.train_unrolls)
-        else:
+        if self.factors_required and not self.factor_static_bool:
+            batch_factors = (self.factors_train[0][batch_indices, :, :], 
+                             self.factors_train[1][batch_indices, :])
             self.state = self.optimizer.init_state(init_params=self.params,
                                                    inputs=input_init,
                                                    b=q_init,
                                                    iters=self.train_unrolls,
                                                    z_stars=z_stars_init,
-                                                   key=self.train_unrolls)
+                                                   key=self.train_unrolls,
+                                                   factors=batch_factors)
+        else:
+            if self.lah:
+                self.state = self.optimizer.init_state(init_params=[self.params[0][:int(self.train_unrolls / self.num_const_steps), :]],
+                                                    inputs=input_init,
+                                                    b=q_init,
+                                                    iters=self.train_unrolls,
+                                                    z_stars=z_stars_init,
+                                                    key=self.train_unrolls)
+            else:
+                self.state = self.optimizer.init_state(init_params=self.params,
+                                                    inputs=input_init,
+                                                    b=q_init,
+                                                    iters=self.train_unrolls,
+                                                    z_stars=z_stars_init,
+                                                    key=self.train_unrolls)
 
             
     def init_params(self):
@@ -441,42 +467,64 @@ class L2Omodel(object):
         # for either of the following cases
         #   1. no factors are needed (pass in None as a static argument)
         #   2. factor is constant for all problems (pass in the same factor as static argument)
-        predict_partial = partial(predict, factor=self.factor_static)
+        
 
-        batch_predict = vmap(predict_partial,
+       
+        if self.factors_required and not self.factor_static_bool:
+            self.pep_penalty = 0
+            # for the case where the factors change for each problem
+            # batch_predict = vmap(predict,
+            #                     in_axes=(None, 0, 0, 0, None, 0),
+            #                     out_axes=out_axes)
+            batch_predict = vmap(predict,
+                                 in_axes=(None, 0, 0, None, 0, None, (0, 0)),
+                                 out_axes=out_axes)
+
+            @partial(jit, static_argnums=(3,))
+            def loss_fn(params, inputs, b, iters, z_stars, key, factors):
+                if diff_required:
+                    losses = batch_predict(params, inputs, b, iters, z_stars, key, factors)
+                    return losses.mean()
+                else:
+                    predict_out = batch_predict(
+                        params, inputs, b, iters, z_stars, key, factors)
+                    losses = predict_out[0]
+                    # loss_out = losses, iter_losses, angles, z_all
+                    return losses.mean(), predict_out
+        else:
+            predict_partial = partial(predict, factor=self.factor_static)
+            batch_predict = vmap(predict_partial,
                                 in_axes=(None, 0, 0, None, 0, None),
                                 out_axes=out_axes)
 
-        @partial(jit, static_argnames=['iters', 'key'])
-        def loss_fn(params, inputs, b, iters, z_stars, key):
-            if diff_required:
-                losses = batch_predict(params, inputs, b, iters, z_stars, key)
-                
-                
-
-                if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
-                    # update so that we have pep
-                    pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
-                    return losses.mean() + self.pep_regularizer_coeff * jnp.clip(pep_loss - self.pep_target, a_min=0, a_max=10000) ** 2
+            @partial(jit, static_argnames=['iters', 'key'])
+            def loss_fn(params, inputs, b, iters, z_stars, key):
+                if diff_required:
+                    losses = batch_predict(params, inputs, b, iters, z_stars, key)
+                    
+                    if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
+                        # update so that we have pep
+                        pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
+                        return losses.mean() + self.pep_regularizer_coeff * jnp.clip(pep_loss - self.pep_target, a_min=0, a_max=10000) ** 2
+                    else:
+                        return losses.mean()
+                    # return losses.mean()
                 else:
-                    return losses.mean()
-                # return losses.mean()
-            else:
-                predict_out = batch_predict(
-                    params, inputs, b, iters, z_stars, key)
-                losses = predict_out[0]
-                
-                # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:10,0]))
-                # import pdb
-                # pdb.set_trace()
-                # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
-                # pep_loss2 = self.pep_clarabel(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
-                # pep_loss3  = self.pepit_nesterov_check(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
-                # print('PEPLOSS3', pep_loss3)
-                
-                # pep_loss = 0
-                self.pep_penalty = 0
-                
-                return losses.mean(), predict_out
+                    predict_out = batch_predict(
+                        params, inputs, b, iters, z_stars, key)
+                    losses = predict_out[0]
+                    
+                    # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:10,0]))
+                    # import pdb
+                    # pdb.set_trace()
+                    # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
+                    # pep_loss2 = self.pep_clarabel(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
+                    # pep_loss3  = self.pepit_nesterov_check(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
+                    # print('PEPLOSS3', pep_loss3)
+                    
+                    # pep_loss = 0
+                    self.pep_penalty = 0
+                    
+                    return losses.mean(), predict_out
 
         return loss_fn

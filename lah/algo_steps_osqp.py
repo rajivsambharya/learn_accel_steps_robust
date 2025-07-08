@@ -219,7 +219,8 @@ def k_steps_eval_osqp(k, z0, q, factor, P, A, rho, sigma, supervised, z_star, ji
 
 def fp_train_osqp(i, val, supervised, z_star, factor, A, q, rho, sigma):
     z, loss_vec = val
-    z_next = fixed_point_osqp_old(z, factor, A, q, rho, sigma)
+    # z_next = fixed_point_osqp_old(z, factor, A, q, rho, sigma)
+    z_next = fixed_point_osqp(z, factor[0], factor[1], A, q, rho, sigma, 1)
     if supervised:
         diff = jnp.linalg.norm(z - z_star)
     else:
@@ -231,7 +232,8 @@ def fp_train_osqp(i, val, supervised, z_star, factor, A, q, rho, sigma):
 def fp_eval_osqp(i, val, supervised, z_star, factor, P, A, q, rho, sigma, custom_loss=None, lightweight=False):
     m, n = A.shape
     z, loss_vec, z_all, primal_residuals, dual_residuals = val
-    z_next = fixed_point_osqp_old(z, factor, A, q, rho, sigma)
+    # z_next = fixed_point_osqp_old(z, factor, A, q, rho, sigma)
+    z_next = fixed_point_osqp(z, factor[0], factor[1], A, q, rho, sigma, 1)
     if custom_loss is None:
         if supervised:
             diff = jnp.linalg.norm(z - z_star)

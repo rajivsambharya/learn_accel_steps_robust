@@ -25,6 +25,19 @@ def main_run_quadcopter(cfg):
         cfg.data.datetime = setup_datetime
     copy_data_file(example, setup_datetime)
     quadcopter.run(cfg)
+
+
+@hydra.main(config_path='configs/quadcopter', config_name='quadcopter_l2ws_run.yaml')
+def main_run_quadcopter_l2ws(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'quadcopter'
+    setup_datetime = cfg.data.datetime
+    if setup_datetime == '':
+        # get the most recent datetime and update datetimes
+        setup_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = setup_datetime
+    copy_data_file(example, setup_datetime)
+    quadcopter.run_l2ws(cfg)
     
 
 @hydra.main(config_path='configs/lasso', config_name='lasso_run.yaml')
@@ -384,3 +397,7 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'quadcopter/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_quadcopter()
+    elif sys.argv[1] == 'quadcopter_l2ws':
+        sys.argv[1] = base + 'quadcopter/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_quadcopter_l2ws()

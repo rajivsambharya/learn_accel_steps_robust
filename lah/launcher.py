@@ -15,7 +15,7 @@ from jax.interpreters import xla
 from functools import partial
 import jax.scipy as jsp
 
-from lah.algo_steps import create_projection_fn, get_psd_sizes, vec_symm
+from lah.algo_steps import create_projection_fn, get_psd_sizes, vec_symm, unvec_symm, form_osqp_matrix
 from lah.lah_box_qp_accel_model import LAHBOXQPAccelmodel
 from lah.gd_model import GDmodel
 from lah.ista_model import ISTAmodel
@@ -685,6 +685,7 @@ class Workspace:
                                         y_stars_test=self.y_stars_test,
                                         regression=cfg.get(
                                             'supervised', False),
+                                        step_varying_num=cfg.get('step_varying_num', 50),
                                         nn_cfg=cfg.nn_cfg,
                                         loss_method=cfg.loss_method,
                                         algo_dict=algo_dict)
@@ -875,25 +876,95 @@ class Workspace:
                                         algo_dict=algo_dict)
 
     def create_osqp_model(self, cfg, static_dict):
-        factor = static_dict['factor']
-        A = static_dict['A']
-        P = static_dict['P']
-        m, n = A.shape
-        self.m, self.n = m, n
-        rho = static_dict['rho']
-        input_dict = dict(factor_static_bool=True,
-                            supervised=cfg.supervised,
-                            rho=rho,
-                            q_mat_train=self.q_mat_train,
-                            q_mat_test=self.q_mat_test,
-                            A=A,
-                            P=P,
-                            m=m,
-                            n=n,
-                            factor=factor,
-                            custom_loss=self.custom_loss,
-                            plateau_decay=cfg.plateau_decay)
-        
+        # import pdb
+        # pdb.set_trace()
+        if self.static_flag:
+            factor = static_dict['factor']
+            A = static_dict['A']
+            P = static_dict['P']
+            m, n = A.shape
+            self.m, self.n = m, n
+            rho = static_dict['rho']
+            input_dict = dict(factor_static_bool=True,
+                              supervised=cfg.supervised,
+                              rho=rho,
+                              q_mat_train=self.q_mat_train,
+                              q_mat_test=self.q_mat_test,
+                              A=A,
+                              P=P,
+                              m=m,
+                              n=n,
+                              factor=factor,
+                            #   train_inputs=self.train_inputs,
+                            #   test_inputs=self.test_inputs,
+                            #   train_unrolls=self.train_unrolls,
+                            #   eval_unrolls=self.eval_unrolls,
+                            #   nn_cfg=cfg.nn_cfg,
+                            #   z_stars_train=self.z_stars_train,
+                            #   z_stars_test=self.z_stars_test,
+                            #   jit=True,
+                              plateau_decay=cfg.plateau_decay)
+        else:
+            self.m, self.n = static_dict['m'], static_dict['n']
+            m, n = self.m, self.n
+            rho_vec = jnp.ones(m)
+            # l0 = self.q_mat_train[0, n: n + m]
+            # u0 = self.q_mat_train[0, n + m: n + 2 * m]
+            # rho_vec = rho_vec.at[l0 == u0].set(1000)
+
+            t0 = time.time()
+
+            # form matrices (N, m + n, m + n) to be factored
+            nc2 = int(n * (n + 1) / 2)
+            q_mat = jnp.vstack([self.q_mat_train, self.q_mat_test])
+            N_train, _ = self.q_mat_train.shape[0], self.q_mat_test[0]
+            N = q_mat.shape[0]
+            unvec_symm_batch = vmap(unvec_symm, in_axes=(0, None), out_axes=(0))
+            P_tensor = unvec_symm_batch(q_mat[:, 2 * m + n: 2 * m + n + nc2], n)
+            A_tensor = jnp.reshape(q_mat[:, 2 * m + n + nc2:], (N, m, n))
+            sigma = 1
+            batch_form_osqp_matrix = vmap(
+                form_osqp_matrix, in_axes=(0, 0, None, None), out_axes=(0))
+
+            # try batching
+            cutoff = 4000
+            matrices1 = batch_form_osqp_matrix(
+                P_tensor[:cutoff, :, :], A_tensor[:cutoff, :, :], rho_vec, sigma)
+            matrices2 = batch_form_osqp_matrix(
+                P_tensor[cutoff:, :, :], A_tensor[cutoff:, :, :], rho_vec, sigma)
+            # matrices =
+
+            # do factors
+            # factors0, factors1 = self.batch_factors(self.q_mat_train)
+            batch_lu_factor = vmap(jsp.linalg.lu_factor, in_axes=(0,), out_axes=(0, 0))
+            factors10, factors11 = batch_lu_factor(matrices1)
+            factors20, factors21 = batch_lu_factor(matrices2)
+            factors0 = jnp.vstack([factors10, factors20])
+            factors1 = jnp.vstack([factors11, factors21])
+
+            t1 = time.time()
+            print('batch factor time', t1 - t0)
+
+            self.factors_train = (factors0[:N_train, :, :], factors1[:N_train, :])
+            self.factors_test = (factors0[N_train:N, :, :], factors1[N_train:N, :])
+
+            input_dict = dict(factor_static_bool=False,
+                              supervised=cfg.supervised,
+                              rho=rho_vec,
+                              q_mat_train=self.q_mat_train,
+                              q_mat_test=self.q_mat_test,
+                              m=self.m,
+                              n=self.n,
+                              train_inputs=self.train_inputs,
+                              test_inputs=self.test_inputs,
+                              factors_train=self.factors_train,
+                              factors_test=self.factors_test,
+                            #   train_unrolls=self.train_unrolls,
+                            #   eval_unrolls=self.eval_unrolls,
+                            #   nn_cfg=cfg.nn_cfg,
+                            #   z_stars_train=self.z_stars_train,
+                            #   z_stars_test=self.z_stars_test,
+                              jit=True)
         self.x_stars_train = self.z_stars_train[:, :self.n]
         self.x_stars_test = self.z_stars_test[:, :self.n]
         self.l2ws_model = OSQPmodel(train_unrolls=self.train_unrolls,
@@ -902,10 +973,41 @@ class Workspace:
                                     test_inputs=self.test_inputs,
                                     regression=cfg.supervised,
                                     nn_cfg=cfg.nn_cfg,
-                                    pac_bayes_cfg=cfg.pac_bayes_cfg,
                                     z_stars_train=self.z_stars_train,
                                     z_stars_test=self.z_stars_test,
                                     algo_dict=input_dict)
+
+        # factor = static_dict['factor']
+        # A = static_dict['A']
+        # P = static_dict['P']
+        # m, n = A.shape
+        # self.m, self.n = m, n
+        # rho = static_dict['rho']
+        # input_dict = dict(factor_static_bool=True,
+        #                     supervised=cfg.supervised,
+        #                     rho=rho,
+        #                     q_mat_train=self.q_mat_train,
+        #                     q_mat_test=self.q_mat_test,
+        #                     A=A,
+        #                     P=P,
+        #                     m=m,
+        #                     n=n,
+        #                     factor=factor,
+        #                     custom_loss=self.custom_loss,
+        #                     plateau_decay=cfg.plateau_decay)
+        
+        # self.x_stars_train = self.z_stars_train[:, :self.n]
+        # self.x_stars_test = self.z_stars_test[:, :self.n]
+        # self.l2ws_model = OSQPmodel(train_unrolls=self.train_unrolls,
+        #                             eval_unrolls=self.eval_unrolls,
+        #                             train_inputs=self.train_inputs,
+        #                             test_inputs=self.test_inputs,
+        #                             regression=cfg.supervised,
+        #                             nn_cfg=cfg.nn_cfg,
+        #                             pac_bayes_cfg=cfg.pac_bayes_cfg,
+        #                             z_stars_train=self.z_stars_train,
+        #                             z_stars_test=self.z_stars_test,
+        #                             algo_dict=input_dict)
 
     def create_scs_model(self, cfg, static_dict):
         if self.static_flag:
@@ -1081,9 +1183,8 @@ class Workspace:
 
             self.q_mat_train = thetas[self.train_indices, :]
             self.q_mat_test = thetas[self.test_indices, :]
-            
-        # import pdb
-        # pdb.set_trace()
+        import pdb
+        pdb.set_trace()
 
         # load the closed_loop_rollout trajectories
         if 'ref_traj_tensor' in jnp_load_obj.keys():
@@ -1162,8 +1263,10 @@ class Workspace:
         primal_residuals, dual_residuals, obj_vals_diff = None, None, None
         dist_opts = None
         if len(out_train) == 6 or len(out_train) == 8:
-            primal_residuals = out_train[4].mean(axis=0)
-            dual_residuals = out_train[5].mean(axis=0)
+            # primal_residuals = out_train[4].mean(axis=0)
+            # dual_residuals = out_train[5].mean(axis=0)
+            primal_residuals = geometric_mean(out_train[4])
+            dual_residuals = geometric_mean(out_train[5])
         elif len(out_train) == 5:
             obj_vals_diff = geometric_mean(out_train[4]) #out_train[4].mean(axis=0)
         elif len(out_train) == 9:
@@ -1453,7 +1556,9 @@ class Workspace:
                     plot_train_test_losses(self.l2ws_model.tr_losses_batch,
                                         self.l2ws_model.te_losses,
                                         self.l2ws_model.num_batches, self.epochs_jit)
-            if self.l2ws_model.accel is not None and self.l2ws_model.accel:
+            # if self.l2ws_model.accel is not None and self.l2ws_model.accel:
+            accel = getattr(self.l2ws_model, "accel", None)   # returns None if attribute missing
+            if accel is not None:
                 break # no progressive training
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
         self.get_confidence_bands()            
@@ -1651,7 +1756,14 @@ class Workspace:
 
     def evaluate_only(self, fixed_ws, num, train, col, batch_size, val=False):
         tag = 'train' if train else 'test'
-        factors = None
+        # factors = None
+        if self.static_flag:
+            factors = None
+        else:
+            if train == 'train':
+                factors = (self.factors_train[0][:num, :, :], self.factors_train[1][:num, :])
+            else:
+                factors = (self.factors_test[0][:num, :, :], self.factors_test[1][:num, :])
 
         if train == 'train':
             z_stars = self.z_stars_train[:num, :]

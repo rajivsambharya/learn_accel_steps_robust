@@ -11,6 +11,10 @@ from lah.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 TAU_FACTOR = 1 #10
 import jax
 
+def form_osqp_matrix(P, A, rho_vec, sigma):
+    m, n = A.shape
+    return P + sigma * jnp.eye(n) + A.T @ jnp.diag(rho_vec) @ A
+
 
 def k_steps_eval_conj_grad(k, z0, q, params, P, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)
