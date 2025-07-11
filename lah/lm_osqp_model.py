@@ -10,7 +10,8 @@ import jax
 
 from lah.algo_steps_osqp import (
     k_steps_eval_lm_osqp,
-    k_steps_train_lm_osqp
+    k_steps_train_lm_osqp,
+    unvec_symm
 )
 from lah.l2o_model import L2Omodel
 from lah.utils.nn_utils import (
@@ -38,8 +39,8 @@ class LMOSQPmodel(L2Omodel):
         self.q_mat_train, self.q_mat_test = input_dict['q_mat_train'], input_dict['q_mat_test']
 
         # M = input_dict['static_M']
-        self.P = input_dict['P'] #M[:self.n, :self.n]
-        self.A = input_dict['A'] #-M[self.n:, :self.n]
+        # self.P = input_dict['P'] #M[:self.n, :self.n]
+        # self.A = input_dict['A'] #-M[self.n:, :self.n]
         # self.M = M
 
 
@@ -52,18 +53,23 @@ class LMOSQPmodel(L2Omodel):
         custom_loss = input_dict.get('custom_loss')
 
         self.k_steps_train_fn = partial(k_steps_train_lm_osqp,
-                                        jit=self.jit,
-                                        P=self.P,
-                                        A=self.A)
+                                        jit=self.jit)
+        self.k_steps_eval_fn = partial(k_steps_eval_lm_osqp,
+                                       jit=self.jit)
+
+        # self.k_steps_train_fn = partial(k_steps_train_lm_osqp,
+        #                                 jit=self.jit,
+        #                                 P=self.P,
+        #                                 A=self.A)
         # self.k_steps_train_fn2 = partial(k_steps_train_lm_scs, proj=self.proj,
         #                                 jit=self.jit,
         #                                 P=self.P,
         #                                 A=self.A,
         #                                 hsde=False)
-        self.k_steps_eval_fn = partial(k_steps_eval_lm_osqp,
-                                       P=self.P, A=self.A,
-                                    #    zero_cone_size=self.zero_cone_size,
-                                       jit=self.jit) #,
+        # self.k_steps_eval_fn = partial(k_steps_eval_lm_osqp,
+        #                                P=self.P, A=self.A,
+        #                             #    zero_cone_size=self.zero_cone_size,
+        #                                jit=self.jit) #,
                                     #    custom_loss=custom_loss,
                                     #    lightweight=lightweight)
         self.lm = True
@@ -130,14 +136,17 @@ class LMOSQPmodel(L2Omodel):
                 eval_fn = self.eval_fn
             else:
                 eval_fn = self.k_steps_eval_fn
+            m, n = self.m, self.n
+            nc2 = int(n * (n + 1) / 2)
+            P = unvec_symm(q[2 * m + n: 2 * m + n + nc2], n)
+            A = jnp.reshape(q[2 * m + n + nc2:], (m, n))
+            q_bar = q[:2 * m + n]
 
             # predict the metric
             scale_vec = jnp.exp(self.predict_scale_vec(params, input, key, bypass_nn))
             sigma_vec = scale_vec[:self.n]
             rho_vec = scale_vec[self.n:]
-            # scale_vec, tau_factor = scale_vec_and_tau[:-1], scale_vec_and_tau[-1]
-            # scale_vec = scale_vec.at[self.n + self.zero_cone_size:].set(scale_vec[self.n + self.zero_cone_size])
-            M = self.P + jnp.diag(sigma_vec) + self.A.T @ jnp.diag(rho_vec) @ self.A
+            M = P + jnp.diag(sigma_vec) + A.T @ jnp.diag(rho_vec) @ A
             factor = jsp.linalg.lu_factor(M)
 
             # print('scale_vec', scale_vec)
@@ -167,14 +176,18 @@ class LMOSQPmodel(L2Omodel):
             if diff_required:
                 z_final, iter_losses = train_fn(k=iters,
                                                 z0=z0,
-                                                q=q,
+                                                q=q_bar,
+                                                P=P,
+                                                A=A,
                                                 params=osqp_params,
                                                 supervised=supervised,
                                                 z_star=z_star)
             else:
                 eval_out = eval_fn(k=iters,
                                     z0=z0,
-                                    q=q,
+                                    q=q_bar,
+                                    P=P,
+                                    A=A,
                                     params=osqp_params,
                                     supervised=supervised,
                                     z_star=z_star)

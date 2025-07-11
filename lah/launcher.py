@@ -564,23 +564,24 @@ class Workspace:
         #                                algo_dict=input_dict)
         
 
-        factor = static_dict['factor']
-        A = static_dict['A']
-        P = static_dict['P']
-        m, n = A.shape
-        self.m, self.n = m, n
-        rho = static_dict['rho']
+        # factor = static_dict['factor']
+        # A = static_dict['A']
+        # P = static_dict['P']
+        self.m, self.n = static_dict['m'], static_dict['n']
+        # m, n = A.shape
+        # self.m, self.n = m, n
+        # rho = static_dict['rho']
         input_dict = dict(algorithm='lm_osqp',
                           factor_static_bool=True,
                           supervised=cfg.supervised,
-                          rho=rho,
+                        #   rho=rho,
                           q_mat_train=self.q_mat_train,
                           q_mat_test=self.q_mat_test,
-                          A=A,
-                          P=P,
-                          m=m,
-                          n=n,
-                          factor=factor,
+                        #   A=A,
+                        #   P=P,
+                          m=self.m,
+                          n=self.n,
+                        #   factor=factor,
                           custom_loss=self.custom_loss,
                           plateau_decay=cfg.plateau_decay)
         self.l2ws_model = LMOSQPmodel(train_unrolls=self.train_unrolls,

@@ -23,6 +23,133 @@ QUADCOPTER_NX = 10
 QUADCOPTER_NU = 4
 plt.rcParams['text.usetex'] = False
 
+def run_lm(run_cfg):
+    example = "quadcopter"
+    data_yaml_filename = 'data_setup_copied.yaml'
+
+    # read the yaml file
+    with open(data_yaml_filename, "r") as stream:
+        try:
+            setup_cfg = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+            setup_cfg = {}
+
+    # set the seed
+    np.random.seed(setup_cfg['seed'])
+
+    # setup the training
+    T, dt = setup_cfg['T'], setup_cfg['dt']
+    nx, nu = QUADCOPTER_NX, QUADCOPTER_NU
+
+    # setup x_min, x_max, u_min, u_max
+    x_min = jnp.array(setup_cfg['x_min'])
+    x_max = jnp.array(setup_cfg['x_max'])
+    u_min = jnp.array(setup_cfg['u_min'])
+    u_max = jnp.array(setup_cfg['u_max'])
+
+    # # num_traj = setup_cfg['num_traj']
+    # traj_length = setup_cfg['rollout_length']
+    # num_rollouts = setup_cfg['num_rollouts']
+    # opt_budget = setup_cfg['rollout_osqp_iters']
+    rollout_length = setup_cfg['rollout_length']
+    # Q_ref = setup_cfg['Q_ref']
+    # create the obstacle courses
+    Q_diag_ref = jnp.zeros(nx)
+    Q_diag_ref = Q_diag_ref.at[:3].set(1)
+    Q_ref = jnp.diag(Q_diag_ref)
+    obstacle_tol = setup_cfg['obstacle_tol']
+
+    n = T * (nx + nu)
+    m = T * (2 * nx + nu)
+
+    # setup delta_u
+    delta_u_list = setup_cfg.get('delta_u', None)
+    if delta_u_list is not None:
+        delta_u = jnp.array(setup_cfg['delta_u'])
+        m = m + T * nu
+
+    # # create the obstacle courses
+    # Q_diag_ref = jnp.zeros(nx)
+    # Q_diag_ref = Q_diag_ref.at[:3].set(1)
+    # Q_ref = jnp.diag(Q_diag_ref)
+    # ref_traj_dict_lists = []
+    # for i in range(num_rollouts):
+    #     traj_list = make_obstacle_course()
+    #     ref_traj_dict = dict(case='obstacle_course', traj_list=traj_list, Q=Q_ref, tol=.05)
+    #     ref_traj_dict_lists.append(ref_traj_dict)
+
+    # # initialize each rollout
+    # x_init_traj = jnp.zeros(nx)
+
+    # # do the closed loop rollouts
+    # for i in range(num_rollouts):
+    #     rollout_results = closed_loop_rollout(opt_qp_solver, sim_len, x_init_traj, quadcopter_dynamics,
+    #                                       system_constants, ref_traj_dict, opt_budget, noise_list=None)
+
+    # mpc_setup = multiple_random_mpc_osqp(5,
+    #                                      T=T,
+    #                                      nx=nx,
+    #                                      nu=nu,
+    #                                      Ad=None,
+    #                                      Bd=None,
+    #                                      seed=setup_cfg['seed'])
+    # # factor, P, A, q_mat_train, theta_mat_train, x_bar, Ad, rho_vec = mpc_setup
+    # # factor, P, A, q_mat_train, theta_mat_train, x_bar, Ad, Bd, rho_vec = mpc_setup
+    # factor, P, A, q_mat_train, theta_mat_train, x_min, x_max, Ad, Bd, rho_vec = mpc_setup
+    
+    # m, n = A.shape
+    
+
+    static_dict = dict(m=m, n=n)
+
+    # we directly save q now
+    static_flag = True #False
+    algo = 'lm_osqp'
+
+    nx = QUADCOPTER_NX
+    nu = QUADCOPTER_NU
+    partial_shifted_sol_fn = partial(shifted_sol, T=T, nx=nx, nu=nu, m=m, n=n)
+    batch_shifted_sol_fn = vmap(partial_shifted_sol_fn, in_axes=(0), out_axes=(0))
+
+    # create closed_loop_rollout_dict
+    system_constants = dict(T=T, nx=nx, nu=nu, dt=dt,
+                            u_min=u_min, u_max=u_max,
+                            x_min=x_min, x_max=x_max,
+                            cd0=jnp.zeros(nx),
+                            delta_u=delta_u)
+    
+    # setup the opt_qp_solver
+
+    # setup Q, QT, R
+    obj_factor = 1
+    Q = jnp.diag(jnp.array(setup_cfg['Q_diag'])) / obj_factor
+    QT = setup_cfg['QT_factor'] * Q
+    R = jnp.diag(jnp.array(setup_cfg['R_diag'])) / obj_factor
+    static_canon_mpc_osqp_partial = partial(static_canon_mpc_osqp, T=T, nx=nx, nu=nu,
+                                        x_min=x_min, x_max=x_max, u_min=u_min,
+                                        u_max=u_max, Q=Q, QT=QT, R=R, delta_u=delta_u)
+    plot_traj_3d_partial = partial(plot_traj_3d, T=T, goal_bound=setup_cfg['goal_bound'])
+    closed_loop_rollout_dict = dict(rollout_length=rollout_length, 
+                                    num_rollouts=run_cfg['num_rollouts'],
+                                    closed_loop_budget=run_cfg['closed_loop_budget'],
+                                    dynamics=quadcopter_dynamics, 
+                                    u_init_traj=jnp.zeros(nu),
+                                    system_constants=system_constants,
+                                    Q_ref=Q_ref,
+                                    obstacle_tol=obstacle_tol,
+                                    static_canon_mpc_osqp_partial=static_canon_mpc_osqp_partial,
+                                    plot_traj=plot_traj_3d_partial)
+
+    workspace = Workspace(algo, run_cfg, static_flag, static_dict, example, 
+                          closed_loop_rollout_dict=closed_loop_rollout_dict,
+                          shifted_sol_fn=batch_shifted_sol_fn,
+                          traj_length=rollout_length)#,
+                        #   traj_length=traj_length)#, shifted_sol_fn=batch_shifted_sol_fn)
+
+    # run the workspace
+    workspace.run()
+
 def run_l2ws(run_cfg):
     example = "quadcopter"
     data_yaml_filename = 'data_setup_copied.yaml'
