@@ -9,6 +9,7 @@ import lah.examples.robust_kalman as robust_kalman
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
 import lah.examples.quadcopter as quadcopter
+import lah.examples.nonneg_ls as nonneg_ls
 import matplotlib
 matplotlib.use('pdf')
 
@@ -118,6 +119,11 @@ def main_setup_opf(cfg):
     opf.setup_probs(cfg)
 
 
+@hydra.main(config_path='configs/nonneg_ls', config_name='nonneg_ls_setup.yaml')
+def main_setup_nonneg_ls(cfg):
+    nonneg_ls.setup_probs(cfg)
+
+
 if __name__ == '__main__':
     if sys.argv[2] == 'cluster':
         # base = 'hydra.run.dir=/scratch/gpfs/rajivs/learn2warmstart/outputs/'
@@ -211,4 +217,8 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'opf/data_setup_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_setup_opf()
+    elif sys.argv[1] == 'nonneg_ls':
+        sys.argv[1] = base + 'nonneg_ls/data_setup_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_setup_nonneg_ls()
 

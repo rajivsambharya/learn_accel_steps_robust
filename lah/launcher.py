@@ -34,7 +34,9 @@ from lah.lah_scs_model import LAHSCSmodel
 from lah.lm_scs_model import LMSCSmodel
 from lah.lm_osqp_model import LMOSQPmodel
 from lah.lah_osqp_accel_model import LAHAccelOSQPmodel
+from lah.lah_nonneg_gd_model import LAHNONNEGGDAccelmodel
 from lah.lista_model import LISTAmodel
+from lah.nonneg_gd_model import NONNEGGDmodel
 from lah.launcher_helper import (
     compute_kl_inv_vector,
     get_nearest_neighbors,
@@ -220,6 +222,10 @@ class Workspace:
             self.create_lah_box_qp_accel_model(cfg, static_dict)
         elif algo == 'lista':
             self.create_lista_model(cfg, static_dict)
+        elif algo == 'lah_nonneg_gd_accel':
+            self.create_lah_nonneg_gd_accel_model(cfg, static_dict)
+        elif algo == 'nonneg_gd_accel':
+            self.create_nonneg_gd_accel_model(cfg, static_dict)
         
         
         
@@ -245,6 +251,34 @@ class Workspace:
                           )
         # self.l2ws_model = ISTAmodel(input_dict)
         self.l2ws_model = ISTAmodel(train_unrolls=self.train_unrolls,
+                                    eval_unrolls=self.eval_unrolls,
+                                    train_inputs=self.train_inputs,
+                                    test_inputs=self.test_inputs,
+                                    regression=cfg.supervised,
+                                    nn_cfg=cfg.nn_cfg,
+                                    z_stars_train=self.z_stars_train,
+                                    z_stars_test=self.z_stars_test,
+                                    algo_dict=input_dict)
+    
+    def create_nonneg_gd_accel_model(self, cfg, static_dict):
+        # get A, lambd, ista_step
+        A = static_dict['A']
+
+        input_dict = dict(algorithm='nonneg_ls',
+                        #   supervised=cfg.supervised,
+                        #   train_unrolls=self.train_unrolls,
+                        #   jit=True,
+                        #   train_inputs=self.train_inputs,
+                        #   test_inputs=self.test_inputs,
+                          b_mat_train=self.q_mat_train,
+                          b_mat_test=self.q_mat_test,
+                          A=A,
+                        #   nn_cfg=cfg.nn_cfg,
+                        #   z_stars_train=self.z_stars_train,
+                        #   z_stars_test=self.z_stars_test,
+                          )
+        # self.l2ws_model = ISTAmodel(input_dict)
+        self.l2ws_model = NONNEGGDmodel(train_unrolls=self.train_unrolls,
                                     eval_unrolls=self.eval_unrolls,
                                     train_inputs=self.train_inputs,
                                     test_inputs=self.test_inputs,
@@ -445,20 +479,18 @@ class Workspace:
                                        pep_target=cfg.pep_target,
                                        algo_dict=input_dict)
         
-    def create_lista_model(self, cfg, static_dict):
+    def create_lah_nonneg_gd_accel_model(self, cfg, static_dict):
         # get A, lambd, ista_step
-        W, D = static_dict['W'], static_dict['D']
-        alista_cfg = {'step': static_dict['step'], 'eta': static_dict['eta']}
+        A = static_dict['A']
+        # alista_cfg = {'step': static_dict['step'], 'eta': static_dict['eta']}
         # ista_step = static_dict['ista_step']
 
-        input_dict = dict(algorithm='lista',
-                          b_mat_train=self.q_mat_train,
-                          b_mat_test=self.q_mat_test,
-                          D=D,
-                          W=W,
-                          lambd=cfg.lambd
+        input_dict = dict(algorithm='nonneg_gd_accel',
+                          c_mat_train=self.q_mat_train,
+                          c_mat_test=self.q_mat_test,
+                         A=A
                           )
-        self.l2ws_model = LISTAmodel(train_unrolls=self.train_unrolls,
+        self.l2ws_model = LAHNONNEGGDAccelmodel(train_unrolls=self.train_unrolls,
                                      eval_unrolls=self.eval_unrolls,
                                      train_inputs=self.train_inputs,
                                      test_inputs=self.test_inputs,
@@ -467,6 +499,8 @@ class Workspace:
                                     #  pac_bayes_cfg=cfg.pac_bayes_cfg,
                                      z_stars_train=self.z_stars_train,
                                      z_stars_test=self.z_stars_test,
+                                     pep_regularizer_coeff=cfg.pep_regularizer_coeff,
+                                       pep_target=cfg.pep_target,
                                     #  alista_cfg=alista_cfg,
                                      algo_dict=input_dict)
         
@@ -1184,8 +1218,8 @@ class Workspace:
 
             self.q_mat_train = thetas[self.train_indices, :]
             self.q_mat_test = thetas[self.test_indices, :]
-        import pdb
-        pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
 
         # load the closed_loop_rollout trajectories
         if 'ref_traj_tensor' in jnp_load_obj.keys():
@@ -1398,7 +1432,11 @@ class Workspace:
                 # nesterov
                 self.l2ws_model.set_params_for_nesterov()
                 self.eval_iters_train_and_test('backtracking', None)
-                # self.l2ws_model.perturb_params()
+            # self.l2ws_model.perturb_params()
+            if self.l2ws_model.algo == 'lah_nonneg_gd':
+                # nesterov
+                # self.l2ws_model.set_params_for_nesterov()
+                self.eval_iters_train_and_test('backtracking', None)
 
             # no learning evaluation
             self.eval_iters_train_and_test('no_train', None)
@@ -1559,8 +1597,8 @@ class Workspace:
                                         self.l2ws_model.num_batches, self.epochs_jit)
             # if self.l2ws_model.accel is not None and self.l2ws_model.accel:
             accel = getattr(self.l2ws_model, "accel", None)   # returns None if attribute missing
-            if accel is not None:
-                break # no progressive training
+            # if accel is not None and accel:
+            #     break # no progressive training
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
         self.get_confidence_bands()            
         
@@ -1701,6 +1739,8 @@ class Workspace:
 
     def eval_iters_train_and_test(self, col, new_start_index):
         try:
+            # import pdb
+            # pdb.set_trace()
             pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
             # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:40,:])))
             print('PEPLOSS', pep_loss)

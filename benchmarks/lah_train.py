@@ -9,6 +9,7 @@ import lah.examples.robust_kalman as robust_kalman
 import lah.examples.ridge_regression as ridge_regression
 import lah.examples.logistic_regression as logistic_regression
 import lah.examples.quadcopter as quadcopter
+import lah.examples.nonneg_ls as nonneg_ls
 from lah.utils.data_utils import copy_data_file, recover_last_datetime
 import matplotlib
 matplotlib.use('pdf')
@@ -313,6 +314,32 @@ def main_run_robust_kalman_lm(cfg):
     robust_kalman.run(cfg, lah=False)
 
 
+@hydra.main(config_path='configs/nonneg_ls', config_name='nonneg_ls_run.yaml')
+def main_run_nonneg_ls(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'nonneg_ls'
+    agg_datetime = cfg.data.datetime
+    if agg_datetime == '':
+        # get the most recent datetime and update datetimes
+        agg_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = agg_datetime
+    copy_data_file(example, agg_datetime)
+    nonneg_ls.run(cfg)
+
+
+@hydra.main(config_path='configs/nonneg_ls', config_name='nonneg_ls_l2ws_run.yaml')
+def main_run_nonneg_ls_l2ws(cfg):
+    orig_cwd = hydra.utils.get_original_cwd()
+    example = 'nonneg_ls'
+    agg_datetime = cfg.data.datetime
+    if agg_datetime == '':
+        # get the most recent datetime and update datetimes
+        agg_datetime = recover_last_datetime(orig_cwd, example, 'data_setup')
+        cfg.data.datetime = agg_datetime
+    copy_data_file(example, agg_datetime)
+    nonneg_ls.run_l2ws(cfg)
+
+
 if __name__ == '__main__':
     if sys.argv[2] == 'cluster':
         # base = 'hydra.run.dir=/scratch/gpfs/rajivs/learn2warmstart/outputs/'
@@ -418,3 +445,11 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'quadcopter/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         main_run_quadcopter_lm()
+    elif sys.argv[1] == 'nonneg_ls':
+        sys.argv[1] = base + 'nonneg_ls/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_nonneg_ls()
+    elif sys.argv[1] == 'nonneg_ls_l2ws':
+        sys.argv[1] = base + 'nonneg_ls/train_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        main_run_nonneg_ls_l2ws()

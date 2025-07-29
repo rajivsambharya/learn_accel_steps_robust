@@ -3,7 +3,7 @@ nn_cfg:
   lr: 1e-1
   method: adam
   batch_size: 100
-  epochs: 200
+  epochs: 400
 
 
 data:
@@ -18,16 +18,16 @@ test_every_x_epochs: 1
 write_csv_every_x_batches: 1
 epochs_jit: 2
 N_train: 10 #00
-N_test: 1000
-N_val: 10
+N_test: 100
+# N_val: 10
 # num_samples: 10
 num_samples_train: 10
-num_samples_test: 10
+num_samples_test: 100
 supervised: True
 plot_iterates: [0, 10, 900]
 loss_method: 'fixed_k'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 0 #10
-pep_target: 0.1
-accel: True
+pep_regularizer_coeff: 0 #10 #10
+pep_target: 0.7
+accel: False

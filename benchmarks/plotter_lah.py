@@ -81,6 +81,14 @@ def lasso_plot_eval_iters(cfg):
     plot_step_sizes(example, cfg)
 
 
+@hydra.main(config_path='configs/nonneg_ls', config_name='nonneg_ls_plot.yaml')
+def nonneg_ls_plot_eval_iters(cfg):
+    example = 'nonneg_ls'
+    create_lah_results_unconstrained(example, cfg)
+    # plot_step_sizes_lasso(example, cfg)
+    plot_step_sizes(example, cfg)
+
+
 @hydra.main(config_path='configs/unconstrained_qp', config_name='unconstrained_qp_plot.yaml')
 def unconstrained_qp_plot_eval_iters(cfg):
     example = 'unconstrained_qp'
@@ -276,6 +284,8 @@ def plot_step_sizes(example, cfg):
         mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], False, True, 'func'
     elif example == 'logistic_regression':
         mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], False, False, 'func'
+    elif example == 'nonneg_ls':
+        mu, L, quad, prox, obj = 0, 1 / step_sizes_list[0][0], True, True, 'dist'
     elif example == 'ridge_regression':
         mu = 0.01
         step_size = step_sizes_list[0][0]
@@ -304,7 +314,7 @@ def plot_step_sizes(example, cfg):
     colors = cmap.colors
     fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
     axes[0].set_ylabel('step sizes')
-    axes[0].set_yscale('log')
+    # axes[0].set_yscale('log')
     # axes[0].yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=2))
     # axes[0].xaxis.set_major_locator(ticker.LinearLocator(numticks=3))
     for i in range(4):
@@ -816,7 +826,12 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
     plt.xlabel('iterations')
-    plt.title('objective suboptimality')
+    # plt.title('objective suboptimality')
+    plt.ylabel('suboptimality')
+    # if split == 'test':
+    #     plt.title('in-distribution')
+    # else:
+    #     plt.title('out-of-distribution')
 
     # plt.ylabel('objective suboptimality')
     # axes[1].set_ylabel('gain to vanilla')
@@ -832,7 +847,8 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             continue
         if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
-        if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
+        # if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
+        if method in ['backtracking', 'lista', 'l2ws']: #, 'l2ws10000']:
             continue
 
         style = titles_2_styles[method]
@@ -1226,3 +1242,7 @@ if __name__ == '__main__':
         sys.argv[1] = base + 'lasso/plots/${now:%Y-%m-%d}/${now:%H-%M-%S}'
         sys.argv = [sys.argv[0], sys.argv[1]]
         lasso_plot_eval_iters()
+    elif sys.argv[1] == 'nonneg_ls':
+        sys.argv[1] = base + 'nonneg_ls/plots/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        sys.argv = [sys.argv[0], sys.argv[1]]
+        nonneg_ls_plot_eval_iters()
