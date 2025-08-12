@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "lah"
+name = "lah_accel"
 description="A package for learning acceleration methods with robustness, using data."
 readme = "README.md"
 license = {text = "Apache 2.0"}
 dynamic = ["version"]
 authors = [
 {name = "Rajiv Sambharya", email="sambhar9@seas.upenn.edu"},
+{name = "Jinho Bok", email="jinhobok@wharton.upenn.edu"},
+{name = "Nikolai Matni", email="nmatni@seas.upenn.edu"},
+{name = "George Pappas", email="pappasg@seas.upenn.edu"}
 ]
 dependencies = [
     "numpy",
@@ -35,12 +38,12 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["lah*", "benchmarks*"]
+include = ["lah_accel*", "benchmarks*"]
 exclude = ["tutorials*", "tests*"]
 
 [tool.setuptools_scm]
 # To infer version automatically from git
-write_to = "lah/_version.py"
+write_to = "lah_accel/_version.py"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "ruff-lsp", "black", "pandas", "jupyterlab"]

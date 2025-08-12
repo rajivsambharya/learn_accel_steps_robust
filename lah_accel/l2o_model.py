@@ -1,0 +1,530 @@
+import logging
+import time
+from functools import partial
+
+import jax.numpy as jnp
+import numpy as np
+import optax
+from jax import jit, random, vmap
+# from jax.config import config
+from jaxopt import OptaxSolver
+
+
+from lah_accel.algo_steps import create_eval_fn, create_train_fn, lin_sys_solve, create_kl_inv_layer, kl_inv_fn
+from lah_accel.utils.nn_utils import (
+    init_network_params,
+    init_variance_network_params,
+    predict_y
+)
+from jaxopt import Bisection
+
+
+import jax
+jax.config.update("jax_enable_x64", True)
+# jax.config.update('jax_disable_jit', True)
+# jax.config.update("jax_debug_nans", True)
+
+
+class L2Omodel(object):
+    def __init__(self, 
+                 train_unrolls=5,
+                 step_varying_num=50,
+                 pep_regularizer_coeff=None,
+                 pep_target=None,
+                 train_inputs=None,
+                 test_inputs=None,
+                 regression=False,
+                 nn_cfg={},
+                 pac_bayes_cfg={},
+                 plateau_decay={},
+                 jit=True,
+                 eval_unrolls=500,
+                 z_stars_train=None,
+                 z_stars_test=None,
+                 x_stars_train=None,
+                 x_stars_test=None,
+                 y_stars_train=None,
+                 y_stars_test=None,
+                 loss_method='fixed_k',
+                 algo_dict={}):
+        if pep_regularizer_coeff is not None and pep_regularizer_coeff > 0:
+            jax.config.update('jax_disable_jit', True)
+        self.pep_regularizer_coeff = pep_regularizer_coeff
+        self.pep_target = pep_target
+        dict = algo_dict
+        self.key = 0
+
+        # essential pieces for the model
+        self.initialize_essentials(jit, eval_unrolls, train_unrolls, train_inputs, test_inputs)
+
+        # set defaults
+        self.set_defaults()
+
+        # initialize algorithm specifics
+        self.lah = True
+        self.lm = False
+        self.loss_method = loss_method
+        self.regression = regression
+        self.initialize_algo(dict)
+
+        # post init changes
+        # self.post_init_changes()
+
+        # optimal solutions (not needed as input)
+        self.setup_optimal_solutions(z_stars_train, z_stars_test, x_stars_train, x_stars_test, 
+                                     y_stars_train, y_stars_test)
+
+        # create_all_loss_fns
+        self.create_all_loss_fns(loss_method, regression)
+        
+
+        # self.step_varying_num = train_unrolls #step_varying_num # 50
+        self.step_varying_num = step_varying_num # 50
+
+        # neural network setup
+        self.initialize_neural_network(nn_cfg, plateau_decay)
+
+        # init to track training
+        self.init_train_tracking()
+
+
+    def reinit_losses(self):
+        self.create_all_loss_fns(self.loss_method, self.regression)
+
+
+    def set_defaults(self):
+        # unless turned off in the subclass, these are the default settings
+        self.factors_required = False
+        self.factor_static = None
+
+
+    def initialize_essentials(self, jit, eval_unrolls, train_unrolls, train_inputs, test_inputs):
+        self.jit = jit
+        self.eval_unrolls = eval_unrolls
+        self.train_unrolls = train_unrolls
+        self.train_inputs, self.test_inputs = train_inputs, test_inputs
+        self.N_train, self.N_test = self.train_inputs.shape[0], self.test_inputs.shape[0]
+        self.static_flag = True
+
+
+    def setup_optimal_solutions(self, z_stars_train, z_stars_test, x_stars_train=None, 
+                                x_stars_test=None, y_stars_train=None, y_stars_test=None):
+        if z_stars_train is not None:
+            self.z_stars_train = jnp.array(z_stars_train) 
+            self.z_stars_test = jnp.array(z_stars_test)
+        else:
+            self.z_stars_train, self.z_stars_test = None, None
+
+    def transform_params(self, params, n_iters):
+        # transformed_params = jnp.exp(params[0][:n_iters - 1, 0])
+        transformed_params = jnp.exp(params[0][:n_iters, :])
+        return transformed_params
+
+    def create_end2end_loss_fn(self, bypass_nn, diff_required):
+        supervised = self.supervised and diff_required
+        loss_method = self.loss_method
+
+        def predict(params, input, q, iters, z_star, key, factor):
+            if self.algo == 'scs':
+                q = lin_sys_solve(factor, q)
+            else:
+                pass
+            z0 = self.predict_warm_start(params, input, key, bypass_nn)
+
+            if self.train_fn is not None:
+                train_fn = self.train_fn
+            else:
+                train_fn = self.k_steps_train_fn
+            if self.eval_fn is not None:
+                eval_fn = self.eval_fn
+            else:
+                eval_fn = self.k_steps_eval_fn
+
+
+            if diff_required:
+                if self.factors_required:
+                    z_final, iter_losses = train_fn(k=iters,
+                                                    z0=z0,
+                                                    q=q,
+                                                    supervised=supervised,
+                                                    z_star=z_star,
+                                                    factor=factor)
+                else:
+                    z_final, iter_losses = train_fn(k=iters,
+                                                    z0=z0,
+                                                    q=q,
+                                                    supervised=supervised,
+                                                    z_star=z_star)
+            else:
+                if self.factors_required:
+                    eval_out = eval_fn(k=iters,
+                                       z0=z0,
+                                       q=q,
+                                       factor=factor,
+                                       supervised=supervised,
+                                       z_star=z_star)
+                else:
+                    eval_out = eval_fn(k=iters,
+                                       z0=z0,
+                                       q=q,
+                                       supervised=supervised,
+                                       z_star=z_star)
+                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+
+                angles = None
+            print('z_final', z_final)
+            loss = self.final_loss(loss_method, z_final, iter_losses, supervised, z0, z_star)
+
+            if diff_required:
+                return loss
+            else:
+                return_out = (loss, iter_losses, z_all_plus_1, angles) + eval_out[3:]
+                return return_out
+        loss_fn = self.predict_2_loss(predict, diff_required)
+        return loss_fn
+
+
+    def train_batch(self, batch_indices, inputs, params, state, n_iters):
+        batch_inputs = inputs[batch_indices, :]
+        batch_q_data = self.q_mat_train[batch_indices, :]
+        batch_z_stars = self.z_stars_train[batch_indices, :]
+
+        key = n_iters #1 if params[0].shape[0] == 0 else self.train_unrolls #state.iter_num
+
+        if self.factors_required and not self.factor_static_bool:
+            # for only the case where the factors are needed
+            # batch_factors = self.factors[batch_indices, :, :]
+            batch_factors = (self.factors_train[0][batch_indices,
+                             :, :], self.factors_train[1][batch_indices, :])
+            results = self.optimizer.update(params=params,
+                                            state=state,
+                                            inputs=batch_inputs,
+                                            b=batch_q_data,
+                                            iters=self.train_unrolls,
+                                            z_stars=batch_z_stars,
+                                            key=key,
+                                            factors=batch_factors)
+        else:
+            # gradient-based methods
+            results = self.optimizer.update(params=params,
+                                            state=state,
+                                            inputs=batch_inputs,
+                                            b=batch_q_data,
+                                            iters=self.train_unrolls,
+                                            z_stars=batch_z_stars,
+                                            key=key)
+        params, state = results
+        self.key = key
+        print('params', params)
+        return state.value, params, state
+
+    def evaluate(self, k, inputs, b, z_stars, fixed_ws, key, factors=None, tag='test', light=False):
+        # return self.static_eval(k, inputs, b, z_stars, key, tag=tag, 
+        #                             fixed_ws=fixed_ws, light=light)
+        if self.factors_required and not self.factor_static_bool:
+            return self.dynamic_eval(k, inputs, b, z_stars, 
+                                     factors=factors, key=self.key, tag=tag, fixed_ws=fixed_ws)
+        else:
+            return self.static_eval(k, inputs, b, z_stars, key, tag=tag, 
+                                    fixed_ws=fixed_ws, light=light)
+
+    def short_test_eval(self):
+        z_stars_test = self.z_stars_test
+
+        if self.lah:
+            z0_inits = z_stars_test * 0
+            if self.algo == 'lah_scs':
+                z0_inits = jnp.hstack([z0_inits, jnp.ones((z0_inits.shape[0], 1))])
+            elif self.algo == 'lah_osqp':
+                z0_inits = z0_inits[:, :self.m + self.n]
+        else:
+            z0_inits = self.test_inputs
+        test_loss, test_out, time_per_prob = self.static_eval(self.train_unrolls,
+                                                            z0_inits,
+                                                                self.q_mat_test,
+                                                                z_stars_test,
+                                                                self.train_unrolls)
+
+        self.te_losses.append(test_loss)
+
+        time_per_iter = time_per_prob / self.train_unrolls
+        return test_loss, time_per_iter
+
+    def dynamic_eval(self, k, inputs, b, z_stars, factors, key, tag='test', fixed_ws=False):
+        if fixed_ws:
+            curr_loss_fn = self.loss_fn_fixed_ws
+        else:
+            curr_loss_fn = self.loss_fn_eval
+        num_probs, _ = inputs.shape
+
+        test_time0 = time.time()
+
+        loss, out = curr_loss_fn(self.params, inputs, b, k, z_stars, key, factors)
+        time_per_prob = (time.time() - test_time0)/num_probs
+
+        return loss, out, time_per_prob
+
+    def static_eval(self, k, inputs, b, z_stars, key, tag='test', fixed_ws=False, light=False):
+        curr_loss_fn = self.loss_fn_fixed_ws if fixed_ws else self.loss_fn_eval
+        if tag == 'silver':
+            curr_loss_fn = self.loss_fn_eval_silver
+        elif tag == 'conj_grad':
+            curr_loss_fn = self.loss_fn_eval_conj_grad
+        elif tag == 'adam':
+            curr_loss_fn = self.loss_fn_eval_adam
+        elif tag == 'backtracking':
+            curr_loss_fn = self.loss_fn_eval_backtracking
+        num_probs, _ = inputs.shape
+        test_time0 = time.time()
+        loss, out = curr_loss_fn(self.params, inputs, b, k, z_stars, key)
+        time_per_prob = (time.time() - test_time0)/num_probs
+        return loss, out, time_per_prob
+
+
+    def initialize_neural_network(self, nn_cfg, plateau_decay, alista_cfg=None):
+        # neural network
+        self.epochs, self.lr = nn_cfg.get('epochs', 10), nn_cfg.get('lr', 1e-3)
+
+        # batching
+        batch_size = nn_cfg.get('batch_size', self.N_train)
+        self.batch_size = min([batch_size, self.N_train])
+        self.num_batches = int(self.N_train/self.batch_size)
+
+        # layer sizes
+        input_size = self.train_inputs.shape[1]
+
+        output_size = self.output_size
+        hidden_layer_sizes = nn_cfg.get('intermediate_layer_sizes', [])
+
+        layer_sizes = [input_size] + hidden_layer_sizes + [output_size]
+        self.layer_sizes = layer_sizes
+
+        self.init_params()
+
+        self.optimizer_method = nn_cfg.get('method', 'adam')
+        self.init_optimizer()
+
+
+    def init_optimizer(self):
+        # initializes the optimizer
+        if self.optimizer_method == 'adam':
+            self.optimizer = OptaxSolver(opt=optax.adam(
+                self.lr), fun=self.loss_fn_train, has_aux=False)
+        elif self.optimizer_method == 'sgd':
+            self.optimizer = OptaxSolver(opt=optax.sgd(
+                self.lr), fun=self.loss_fn_train, has_aux=False)
+
+        # Initialize state with first elements of training data as inputs
+        batch_indices = np.arange(5) #jnp.arange(self.N_train)
+        if self.lah:
+            input_init = self.lah_train_inputs[batch_indices, :] #self.train_inputs[batch_indices, :]
+        # elif self.lm:
+        #     input_init = 0 * self.z_stars_train[batch_indices, :]
+        else:
+            input_init = self.train_inputs[batch_indices, :]
+        q_init = self.q_mat_train[batch_indices, :]
+        z_stars_init = self.z_stars_train[batch_indices, :] #if self.supervised else None
+
+        if not hasattr(self, 'num_const_steps'):
+            self.num_const_steps = 1
+
+        if self.factors_required and not self.factor_static_bool:
+            batch_factors = (self.factors_train[0][batch_indices, :, :], 
+                             self.factors_train[1][batch_indices, :])
+            self.state = self.optimizer.init_state(init_params=self.params,
+                                                   inputs=input_init,
+                                                   b=q_init,
+                                                   iters=self.train_unrolls,
+                                                   z_stars=z_stars_init,
+                                                   key=self.train_unrolls,
+                                                   factors=batch_factors)
+        else:
+            if self.lah:
+                self.state = self.optimizer.init_state(init_params=[self.params[0][:int(self.train_unrolls / self.num_const_steps), :]],
+                                                    inputs=input_init,
+                                                    b=q_init,
+                                                    iters=self.train_unrolls,
+                                                    z_stars=z_stars_init,
+                                                    key=self.train_unrolls)
+            else:
+                self.state = self.optimizer.init_state(init_params=self.params,
+                                                    inputs=input_init,
+                                                    b=q_init,
+                                                    iters=self.train_unrolls,
+                                                    z_stars=z_stars_init,
+                                                    key=self.train_unrolls)
+
+            
+    def init_params(self):
+        # initialize weights of neural network
+        self.mean_params = init_network_params(self.layer_sizes, random.PRNGKey(0))
+
+        self.params = [self.mean_params] #, self.sigma_params, self.prior_param]
+
+
+    def create_all_loss_fns(self, loss_method, supervised):
+        # to describe the final loss function (not the end-to-end loss fn)
+        self.loss_method = loss_method
+        self.supervised = supervised
+
+        self.train_fn = self.k_steps_train_fn
+        self.eval_fn = self.k_steps_eval_fn
+
+        e2e_loss_fn = self.create_end2end_loss_fn
+
+        # end-to-end loss fn for training
+        self.loss_fn_train = e2e_loss_fn(bypass_nn=False, diff_required=True)
+
+        # end-to-end loss fn for evaluation
+        self.loss_fn_eval = e2e_loss_fn(bypass_nn=False, diff_required=False)
+
+        # end-to-end added fixed warm start eval - bypasses neural network
+        self.loss_fn_fixed_ws = e2e_loss_fn(bypass_nn=True, diff_required=False)
+
+
+    def init_train_tracking(self):
+        self.epoch = 0
+        self.tr_losses = None
+        self.te_losses = None
+        self.train_data = []
+        self.tr_losses_batch = []
+        self.te_losses = []
+
+
+    def predict_warm_start(self, params, input, key, bypass_nn):
+        """
+        gets the warm-start
+        bypass_nn means we ignore the neural network and set z0=input
+        """
+        if bypass_nn:
+            z0 = input
+        else:
+            # new stochastic
+            mean_params = params[0]
+            nn_output = predict_y(mean_params, input)
+
+            z0 = nn_output
+        if self.algo == 'scs':
+            z0_full = jnp.ones(z0.size + 1)
+            z0_full = z0_full.at[:z0.size].set(z0)
+        else:
+            z0_full = z0
+        return z0_full
+
+
+    def final_loss(self, loss_method, z_last, iter_losses, supervised, z0, z_star):
+        """
+        encodes several possible loss functions
+
+        z_last is the last iterate from DR splitting
+        z_penultimate is the second to last iterate from DR splitting
+
+        z_star is only used if supervised
+
+        z0 is only used if the loss_method is first_2_last
+        """
+        # return iter_losses[-1]
+        if supervised:
+            if loss_method == 'constant_sum':
+                loss = iter_losses[1:].sum()
+            elif loss_method == 'fixed_k':
+                # loss = jnp.linalg.norm(z_last[:-1]/z_star[-1] - z_star)
+                loss = iter_losses[-1]
+        else:
+            if loss_method == 'increasing_sum':
+                weights = (1+jnp.arange(iter_losses.size))
+                loss = iter_losses @ weights
+            elif loss_method == 'constant_sum':
+                loss = iter_losses[1:].sum()
+            elif loss_method == 'fixed_k':
+                loss = iter_losses[-1]
+            elif loss_method == 'first_2_last':
+                loss = jnp.linalg.norm(z_last - z0)
+        return loss
+
+    def get_out_axes_shape(self, diff_required):
+        if diff_required:
+            # out_axes for (loss)
+            out_axes = (0)
+        else:
+            # out_axes for
+            #   (loss, iter_losses, angles, primal_residuals, dual_residuals, out)
+            #   out = (all_z_, z_next, alpha, all_u, all_v)
+            # out_axes = (0, 0, 0, 0)
+            # if self.out_axes_length is None:
+            if hasattr(self, 'out_axes_length'):
+                out_axes = (0,) * self.out_axes_length
+            else:
+                out_axes = (0,) * 4
+        return out_axes
+
+    def predict_2_loss(self, predict, diff_required):
+        out_axes = self.get_out_axes_shape(diff_required)
+
+        # just for reference, the arguments for predict are
+        #   predict(params, input, q, iters, z_star, factor)
+
+        # for either of the following cases
+        #   1. no factors are needed (pass in None as a static argument)
+        #   2. factor is constant for all problems (pass in the same factor as static argument)
+        
+
+       
+        if self.factors_required and not self.factor_static_bool:
+            self.pep_penalty = 0
+            # for the case where the factors change for each problem
+            # batch_predict = vmap(predict,
+            #                     in_axes=(None, 0, 0, 0, None, 0),
+            #                     out_axes=out_axes)
+            batch_predict = vmap(predict,
+                                 in_axes=(None, 0, 0, None, 0, None, (0, 0)),
+                                 out_axes=out_axes)
+
+            @partial(jit, static_argnums=(3,))
+            def loss_fn(params, inputs, b, iters, z_stars, key, factors):
+                if diff_required:
+                    losses = batch_predict(params, inputs, b, iters, z_stars, key, factors)
+                    return losses.mean()
+                else:
+                    predict_out = batch_predict(
+                        params, inputs, b, iters, z_stars, key, factors)
+                    losses = predict_out[0]
+                    # loss_out = losses, iter_losses, angles, z_all
+                    return losses.mean(), predict_out
+        else:
+            predict_partial = partial(predict, factor=self.factor_static)
+            batch_predict = vmap(predict_partial,
+                                in_axes=(None, 0, 0, None, 0, None),
+                                out_axes=out_axes)
+
+            @partial(jit, static_argnames=['iters', 'key'])
+            def loss_fn(params, inputs, b, iters, z_stars, key):
+                if diff_required:
+                    losses = batch_predict(params, inputs, b, iters, z_stars, key)
+                    
+                    if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
+                        # update so that we have pep
+                        pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))
+                        return losses.mean() + self.pep_regularizer_coeff * jnp.clip(pep_loss - self.pep_target, a_min=0, a_max=10000) ** 2
+                    else:
+                        return losses.mean()
+                    # return losses.mean()
+                else:
+                    predict_out = batch_predict(
+                        params, inputs, b, iters, z_stars, key)
+                    losses = predict_out[0]
+                    
+                    # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:10,0]))
+                    # import pdb
+                    # pdb.set_trace()
+                    # pep_loss = self.pep_cvxpylayer(jnp.exp(params[0][:self.train_unrolls,:]))
+                    # pep_loss2 = self.pep_clarabel(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
+                    # pep_loss3  = self.pepit_nesterov_check(np.array(jnp.exp(params[0][:self.train_unrolls,:])))
+                    # print('PEPLOSS3', pep_loss3)
+                    
+                    # pep_loss = 0
+                    self.pep_penalty = 0
+                    
+                    return losses.mean(), predict_out
+
+        return loss_fn

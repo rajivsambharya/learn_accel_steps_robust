@@ -29,7 +29,7 @@ Replace the ```<example> ``` with one of the following to run an experiment.
 ```
 logistic_regression
 lasso
-noneg_ls
+nonneg_ls
 quadcopter
 robust_kalman
 ```
@@ -90,19 +90,19 @@ We highlight the mains ones here (both the raw data in csv files and the corresp
     ```outputs/quadcopter/train_outputs/2024-10-04/15-50-10/train_test_results.csv```
     ```outputs/quadcopter/train_outputs/2024-10-04/15-50-10/losses_over_training.pdf```
 
-- The ```accuracies_test``` folder holds the results that are used for the tables. First, it holds the average number of iterations to reach the desired accuracies in terms of the performance metric (either the suboptimality or maximum of primal and dual residuals depending on if the problem is constrained or no) ($0.1$, $0.01$, $0.001$, and $0.0001$ by default).
-
 
 The results for the non-data-driven methods (e.g., Nesterov's acceleration, the silver step size rule, the nearest neighbor approach) are all run by default before any training is complete without an additional command.
 
 The results for the learned warm start (L2WS) and learned metric (LM) methods can be obtained with
 ```
-python benchmarks/lah_train.py maxcut_l2ws local
-python benchmarks/lah_train.py maxcut_lm local
+python benchmarks/lah_train.py quadcopter_l2ws local
+python benchmarks/lah_train.py quadcopter_lm local
 ```
+
+To train the LAH method (without using acceleration), turn off the acceleration toggle (``accel'') in the config files.
 
 
 ***
 #### ```benchmarks/plotter_lah_accel.py```
 This file contains the code to plot the results and visualize the step sizes.
-In this case, you must update the config file (e.g., ```configs/maxcut/quadcopter_plot.yaml```) with the correct datetimes used to train the method.
+In this case, you must update the config file (e.g., ```configs/quadcopter/quadcopter_plot.yaml```) with the correct datetimes used to train the method.

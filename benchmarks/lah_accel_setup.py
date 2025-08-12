@@ -2,14 +2,12 @@ import sys
 
 import hydra
 
-import lah.examples.lasso as lasso
-import lah.examples.maxcut as maxcut
-import lah.examples.mnist as mnist
-import lah.examples.robust_kalman as robust_kalman
-import lah.examples.ridge_regression as ridge_regression
-import lah.examples.logistic_regression as logistic_regression
-import lah.examples.quadcopter as quadcopter
-import lah.examples.nonneg_ls as nonneg_ls
+import lah_accel.examples.lasso as lasso
+import lah_accel.examples.robust_kalman as robust_kalman
+import lah_accel.examples.ridge_regression as ridge_regression
+import lah_accel.examples.logistic_regression as logistic_regression
+import lah_accel.examples.quadcopter as quadcopter
+import lah_accel.examples.nonneg_ls as nonneg_ls
 import matplotlib
 matplotlib.use('pdf')
 

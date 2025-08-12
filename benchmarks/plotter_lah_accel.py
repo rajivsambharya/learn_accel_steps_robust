@@ -7,11 +7,10 @@ import pandas as pd
 import yaml
 from pandas import read_csv
 
-from lah.utils.data_utils import recover_last_datetime
+from lah_accel.utils.data_utils import recover_last_datetime
 
-from lah.examples.robust_kalman import plot_positions_overlay, get_x_kalman_from_x_primal
-from lah.examples.mnist import plot_mult_mnist_img
-from lah.pep import pepit_nesterov, pepit_accel_gd
+from lah_accel.examples.robust_kalman import plot_positions_overlay, get_x_kalman_from_x_primal
+from lah_accel.pep import pepit_nesterov, pepit_accel_gd
 
 from benchmarks.plotter_lah_constants import titles_2_colors, titles_2_marker_starts, titles_2_markers, titles_2_styles
 import matplotlib as mpl

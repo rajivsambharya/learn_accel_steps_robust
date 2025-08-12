@@ -176,5 +176,7 @@ cython_debug/
 outputs/
 kl_inv_cache/
 lah/examples/mnist_data/
+lah_accel/examples/mnist_data/
 layers/
 slurm*
+.vscode/
