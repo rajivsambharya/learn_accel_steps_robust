@@ -61,11 +61,12 @@ By default we do progressive training $10$ steps at a time.
 To replicate our results in the paper, no inputs in the config need to be changed.
 Periodically, we evaluate the performance of the learned optimizer over both the training and test sets.
 Some that may be of interest are
-- ```train_unrolls``` (the number of progressive training steps)
-- ```step_varying_num``` (the number of iterations in our step-varying phase, $H$ in our paper - set to $50$ by default)
+- ```train_unrolls``` (the number of steps to train for)
 - ```nn_cfg/lr``` (the learning rate of the meta-optimizer)
 - ```nn_cfg/epochs``` (the number of epochs to train on for each progressive training piece)
 - ```eval_unrolls``` (the number of evaluation iterations to run)
+- ```pep_regularizer_coeff``` (the PEP regularizer coefficient -- either 0 or 10 in the paper)
+- ```pep_target``` (the regularizater target value)
 
 ```
 outputs/quadcopter/train_outputs/2025-06-03/18-54-32/
