@@ -805,6 +805,81 @@ def compute_gradient(X, y, y_hat):
     db = jnp.mean(error)
     return dw, db
 
+
+def fixed_point_logistic_bb(z, z_prev, grad_prev, X, y, eta0):
+    w, b = z[:-1], z[-1]
+    logits = jnp.clip(X @ w + b, -20, 20)
+    y_hat = sigmoid(logits)
+    dw, db = compute_gradient(X, y, y_hat)
+    grad = jnp.hstack([dw, db])
+
+    s = z - z_prev
+    yk = grad - grad_prev
+    ss = jnp.dot(s, s)
+    sy = jnp.dot(s, yk)
+
+    # BB1 (long) step: alpha = ||s||^2 / (s^T y); fall back to eta0 when sy <= 0
+    alpha = jnp.where(sy > 1e-14, ss / sy, eta0)
+    alpha = jnp.clip(alpha, 1e-10, 1e3)
+
+    z_next = z - alpha * grad
+    return z_next, grad
+
+
+def fp_eval_logistic_bb(i, val, supervised, z_star, X, y_label, eta0):
+    z, z_prev, grad_prev, t, loss_vec, z_all, obj_diffs = val
+    z_next, grad_next = fixed_point_logistic_bb(z, z_prev, grad_prev, X, y_label, eta0)
+    t_next = t + 1
+
+    diff = jnp.linalg.norm(z - z_star) if supervised else jnp.linalg.norm(z_next - z)
+    loss_vec = loss_vec.at[i].set(diff)
+    z_all = z_all.at[i, :].set(z_next)
+
+    w, b = z[:-1], z[-1]
+    obj = compute_loss(y_label, sigmoid(X @ w + b))
+    w_star, b_star = z_star[:-1], z_star[-1]
+    opt_obj = compute_loss(y_label, sigmoid(X @ w_star + b_star))
+    obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
+
+    return z_next, z, grad_next, t_next, loss_vec, z_all, obj_diffs
+
+
+def k_steps_eval_logistic_bb(k, z0, q, num_points, eta0, supervised, z_star, jit):
+    X_flat = q[:num_points * 784]
+    X = jnp.reshape(X_flat, (num_points, 784))
+    y_label = q[num_points * 784:]
+    iter_losses = jnp.zeros(k)
+    z_all_plus_1 = jnp.zeros((k + 1, z0.size)).at[0, :].set(z0)
+    z_all = jnp.zeros((k, z0.size))
+    obj_diffs = jnp.zeros(k)
+    t0 = 0
+
+    w0, b0 = z0[:-1], z0[-1]
+    y_hat0 = sigmoid(jnp.clip(X @ w0 + b0, -20, 20))
+    dw0, db0 = compute_gradient(X, y_label, y_hat0)
+    grad0 = jnp.hstack([dw0, db0])
+
+    val = z0, z0, grad0, t0, iter_losses, z_all, obj_diffs
+
+    fp_eval_partial = partial(fp_eval_logistic_bb,
+                              supervised=supervised,
+                              z_star=z_star,
+                              X=X,
+                              y_label=y_label,
+                              eta0=eta0)
+
+    if jit:
+        out = lax.fori_loop(0, k, fp_eval_partial, val)
+    else:
+        for i in range(k):
+            val = fp_eval_partial(i, val)
+        out = val
+
+    z_final, _, _, _, iter_losses, z_all, obj_diffs = out
+    z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
+    return z_final, iter_losses, z_all_plus_1, obj_diffs
+
+
 def fixed_point_logistic_backtracking(z, X, y, eta_init, beta, alpha):
     w, b = z[:-1], z[-1]
     logits = jnp.clip(X @ w + b, -20, 20)
