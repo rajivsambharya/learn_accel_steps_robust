@@ -1,6 +1,5 @@
 from functools import partial
 
-import cvxpy as cp
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax import grad, jit, lax, vmap
@@ -806,42 +805,6 @@ def fp_eval_glista(i, val, supervised, z_star, params, W, D, b):
     obj_diffs = obj_diffs.at[i].set(obj - opt_obj)
     z_all = z_all.at[i, :].set(z_next)
     return z_next, loss_vec, z_all, obj_diffs
-
-def true_fun(_):
-    return 0
-
-def false_fun(_):
-    return 1
-
-
-def kl_inv_fn(r, q, c):
-    p = (1 - q) * r + q
-    return q * jnp.log(q / p) + (1 - q) * jnp.log((1 - q) / (1 - p)) - c
-# def kl_inv_fn(p, q, c):
-#     pen = lax.cond(p >= q, None, true_fun, None, false_fun)
-#     return pen + q * jnp.log(q / p) + (1 - q) * jnp.log((1 - q) / (1 - p)) - c
-
-
-def create_kl_inv_layer():
-    """
-    create the cvxpylayer
-    """
-    p = cp.Variable(2)
-    q_param = cp.Parameter(2)
-    c_param = cp.Parameter(1)
-
-    constraints = [c_param >= cp.sum(cp.kl_div(q_param, p)), 
-                   0 <= p[0], p[0] <= 1, p[1] == 1.0 - p[0]]
-    objective = cp.Maximize(p[0])
-    problem = cp.Problem(objective, constraints)
-    assert problem.is_dpp()
-
-    layer = CvxpyLayer(
-        problem, parameters=[q_param, c_param], variables=[p]
-    )
-
-    return layer
-
 
 def k_steps_train_lista_cpss(k, z0, q, params, D, supervised, z_star, jit):
     iter_losses = jnp.zeros(k)

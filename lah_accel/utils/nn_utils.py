@@ -1,42 +1,9 @@
 import functools
 
-import cvxpy as cp
 import jax.numpy as jnp
 import numpy as np
 from jax import jit, random, vmap
 from scipy.spatial import distance_matrix
-from jaxopt import Bisection
-from lah_accel.algo_steps import kl_inv_fn
-
-
-def invert_kl(q, c):
-    """
-    given scalars q and c returns
-    kl^{-1}(q ||c) = sup p s.t. 0 <= p <= 1, KL(q || p) <= c
-    """
-    if q >= 0.999999:
-        return 1.0
-    # bisec = Bisection(optimality_fun=kl_inv_fn, lower=0.0, upper=1.0, 
-    #                                   check_bracket=False,
-    #                                   jit=True)
-
-    # out = bisec.run(q=q, c=c)
-    # r = out.params
-    # p = (1 - q) * r + q
-    # return p
-    p_bernoulli = cp.Variable(2)
-    q_bernoulli = np.array([q, 1-q])
-    constraints = [c >= cp.sum(cp.kl_div(q_bernoulli,p_bernoulli)), 
-                   0 <= p_bernoulli[0], p_bernoulli[0] <= 1, p_bernoulli[1] == 1.0 - p_bernoulli[0]]
-
-    prob = cp.Problem(cp.Maximize(p_bernoulli[0]), constraints)
-
-    # Solve problem
-    prob.solve(verbose=False, solver=cp.SCS) # solver=cvx.ECOS
-    
-    kl_inv = p_bernoulli.value[0] 
-
-    return kl_inv
 
 
 def calculate_avg_posterior_var(params):

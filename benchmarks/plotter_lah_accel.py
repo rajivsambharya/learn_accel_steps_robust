@@ -997,34 +997,6 @@ def populate_curr_method_gain_dict(cold_start_dict, method_dict, constrained, nu
     return curr_method_gain_dict
 
 
-def load_frac_solved(example, datetime, acc, upper, title):
-    orig_cwd = hydra.utils.get_original_cwd()
-    path = f"{orig_cwd}/outputs/{example}/train_outputs/{datetime}/frac_solved_{title}"
-
-    fp_file = f"tol={acc}_test.csv"
-    try:
-        df = read_csv(f"{path}/{fp_file}")
-    except Exception as e:
-        new_acc = 39810.7170553499
-        fp_file = f"tol={new_acc}_test.csv"
-        df = read_csv(f"{path}/{fp_file}")
-
-    if title is None or True:
-        if upper:
-            results = df['upper_risk_bound']
-        else:
-            results = df['lower_risk_bound']
-    else:
-        results = df[title]
-    return results
-
-
-def get_accs():
-    # accuracies = cfg.accuracies
-    start = -10  # Start of the log range (log10(10^-5))
-    end = 5  # End of the log range (log10(1))
-    accuracies = list(np.round(np.logspace(start, end, num=151), 10))
-    return accuracies
 
 
 

@@ -64,7 +64,7 @@ def plot_eval_iters_df(df, train, col, ylabel, filename,
                        eval_unrolls, train_unrolls,
                            xlabel='evaluation iterations',
                            xvals=None,
-                           yscale='log', pac_bayes=False):
+                           yscale='log'):
     if xvals is None:
         xvals = np.arange(eval_unrolls)
     # plot the cold-start if applicable
@@ -84,8 +84,6 @@ def plot_eval_iters_df(df, train, col, ylabel, filename,
     # plot the learned warm-start if applicable
     if col != 'no_train' and col != 'pretrain' and col != 'nearest_neighbor' and col != 'prev_sol':  # noqa
         plt.plot(xvals, df[col], label=f"train k={train_unrolls}")
-        if pac_bayes:
-            plt.plot(xvals, df[col + '_pac_bayes'], label="pac_bayes")
     if yscale == 'log':
         plt.yscale('log')
     # plt.xlabel('evaluation iterations')

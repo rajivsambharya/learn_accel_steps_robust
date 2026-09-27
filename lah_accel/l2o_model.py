@@ -10,7 +10,7 @@ from jax import jit, random, vmap
 from jaxopt import OptaxSolver
 
 
-from lah_accel.algo_steps import create_eval_fn, create_train_fn, lin_sys_solve, create_kl_inv_layer, kl_inv_fn
+from lah_accel.algo_steps import create_eval_fn, create_train_fn, lin_sys_solve
 from lah_accel.utils.nn_utils import (
     init_network_params,
     init_variance_network_params,
@@ -35,7 +35,6 @@ class L2Omodel(object):
                  test_inputs=None,
                  regression=False,
                  nn_cfg={},
-                 pac_bayes_cfg={},
                  plateau_decay={},
                  jit=True,
                  eval_unrolls=500,
@@ -51,7 +50,6 @@ class L2Omodel(object):
             jax.config.update('jax_disable_jit', True)
         self.pep_regularizer_coeff = pep_regularizer_coeff
         self.pep_target = pep_target
-        self.delta = pac_bayes_cfg.get('delta', 1e-5)
         dict = algo_dict
         self.key = 0
 

@@ -37,7 +37,6 @@ from lah_accel.lah_nonneg_gd_model import LAHNONNEGGDAccelmodel
 from lah_accel.lista_model import LISTAmodel
 from lah_accel.nonneg_gd_model import NONNEGGDmodel
 from lah_accel.launcher_helper import (
-    compute_kl_inv_vector,
     get_nearest_neighbors,
     normalize_inputs_fn,
     plot_samples,
@@ -88,19 +87,6 @@ class Workspace:
             self.custom_loss = custom_loss
         else:
             self.custom_loss = None
-        pac_bayes_cfg = cfg.get('pac_bayes_cfg', {})
-        self.skip_pac_bayes_full = pac_bayes_cfg.get('skip_full', True)
-
-        pac_bayes_accs = pac_bayes_cfg.get(
-            'frac_solved_accs', 'fp_full')
-
-        if pac_bayes_accs == 'fp_full':
-            start = -10  # Start of the log range (log10(10^-5))
-            end = 5  # End of the log range (log10(1))
-            pac_bayes_accs = list(np.round(np.logspace(start, end, num=151), 10))
-        self.frac_solved_accs = pac_bayes_accs
-        self.rep = pac_bayes_cfg.get('rep', True)
-
         self.key_count = 0
 
         self.static_flag = static_flag
@@ -303,7 +289,6 @@ class Workspace:
                                   test_inputs=self.test_inputs,
                                   regression=cfg.supervised,
                                   nn_cfg=cfg.nn_cfg,
-                                  pac_bayes_cfg=cfg.pac_bayes_cfg,
                                   z_stars_train=self.z_stars_train,
                                   z_stars_test=self.z_stars_test,
                                   algo_dict=input_dict)
@@ -493,7 +478,6 @@ class Workspace:
                                      test_inputs=self.test_inputs,
                                      regression=cfg.supervised,
                                      nn_cfg=cfg.nn_cfg,
-                                    #  pac_bayes_cfg=cfg.pac_bayes_cfg,
                                      z_stars_train=self.z_stars_train,
                                      z_stars_test=self.z_stars_test,
                                      pep_regularizer_coeff=cfg.pep_regularizer_coeff,
@@ -1087,7 +1071,6 @@ class Workspace:
                                    y_stars_test=self.y_stars_test,
                                    regression=cfg.get('supervised', False),
                                    nn_cfg=cfg.nn_cfg,
-                                   pac_bayes_cfg=cfg.pac_bayes_cfg,
                                    algo_dict=algo_dict)
 
     def setup_opt_sols(self, algo, jnp_load_obj, N_train, N, num_plot=2):
@@ -1509,13 +1492,19 @@ class Workspace:
         num_epochs_jit = int(self.l2ws_model.epochs / self.epochs_jit)
         loop_size = int(self.l2ws_model.num_batches * self.epochs_jit)
 
-        num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls + 1)
+        # acceleration methods (e.g. lah_accel_logisticgd) don't have a separate
+        # steady-state phase: training just covers step_varying_num and stops,
+        # then robustness_polish handles the end-of-training certification.
+        has_steady_state_phase = self.l2ws_model.algo != 'lah_accel_logisticgd'
+        num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls)
+        if has_steady_state_phase:
+            num_progressive_trains += 1
 
         for window in range(num_progressive_trains):
             # update window_indices
-            window_indices = jnp.arange(int(self.train_unrolls * window / self.l2ws_model.num_const_steps), 
+            window_indices = jnp.arange(int(self.train_unrolls * window / self.l2ws_model.num_const_steps),
                                         int(self.train_unrolls * (window + 1) / self.l2ws_model.num_const_steps))
-            steady_state = window == num_progressive_trains - 1
+            steady_state = has_steady_state_phase and window == num_progressive_trains - 1
 
             # update the train inputs
             update_train_inputs_flag = window > 0 and self.l2ws_model.lah
@@ -1606,63 +1595,8 @@ class Workspace:
             self.l2ws_model.robustness_polish()
             self.eval_iters_train_and_test("robustness_polished", None)
 
-        self.get_confidence_bands()
-        
-
-    def get_confidence_bands(self):
         # do the final evaluation
-        out_train = self.evaluate_iters(self.num_samples_test, 'final', train='test')
-
-        if len(out_train) == 6 or len(out_train) == 8:
-            primal_residuals = out_train[4] #.mean(axis=0)
-            dual_residuals = out_train[5] #.mean(axis=0)
-            pr_dr_maxes = jnp.maximum(primal_residuals, dual_residuals)
-        elif len(out_train) == 5:
-            obj_diffs = out_train[4] #.mean(axis=0)
-        elif len(out_train) == 9:
-            primal_residuals = out_train[4] #.mean(axis=0)
-            dual_residuals = out_train[5] #.mean(axis=0)
-            dist_opts = out_train[8].mean(axis=0)
-            if primal_residuals is not None:
-                pr_dr_maxes = jnp.maximum(primal_residuals, dual_residuals)
-
-        # loop over metric
-        if len(out_train) in [9, 6, 8]:
-            metric_names = ['primal_residuals', 'dual_residuals', 'pr_dr_maxes']
-            metrics = [primal_residuals, dual_residuals, pr_dr_maxes]
-        elif len(out_train) == 5:
-            metric_names = ['obj_diffs']
-            metrics = [obj_diffs]
-        
-        for j in range(len(metrics)):
-            metric = metrics[j]
-            metric_name = metric_names[j]
-            for i in range(len(self.frac_solved_accs)):
-                # compute frac solved
-                fs = (metric < self.frac_solved_accs[i])
-                emp_success_rates = fs.mean(axis=0) # a vector over the iterations
-                emp_risks = 1 - emp_success_rates  # a vector over the iterations
-
-                try:
-                    upper_risk_bounds = compute_kl_inv_vector(emp_risks, self.l2ws_model.delta,
-                                                            self.N_val)
-                    lower_risk_bounds = 1 - compute_kl_inv_vector(emp_success_rates, self.l2ws_model.delta,
-                                                                self.N_val)
-                except ValueError as e:
-                    print(f"skipping confidence bands for {metric_name} "
-                          f"(accuracy={self.frac_solved_accs[i]}): {e}")
-                    continue
-                if not os.path.exists(f"frac_solved_{metric_name}"):
-                    os.mkdir(f"frac_solved_{metric_name}")
-                filename = f"frac_solved_{metric_name}/tol={self.frac_solved_accs[i]}"
-                curr_df = self.frac_solved_df_list_test[i]
-                curr_df['empirical_risk'] = emp_risks
-                curr_df['upper_risk_bound'] = upper_risk_bounds
-                curr_df['lower_risk_bound'] = lower_risk_bounds
-
-                # plot and update csv
-                csv_filename = filename + '_test.csv'
-                curr_df.to_csv(csv_filename)
+        self.evaluate_iters(self.num_samples_test, 'final', train='test')
 
 
     def train_jitted_epochs(self, permutation, epoch, window_indices, steady_state):
@@ -1986,13 +1920,6 @@ class Workspace:
         self.dist_opts_df_train = create_empty_df(self.eval_unrolls)
         self.dist_opts_df_test = create_empty_df(self.eval_unrolls)
         self.dist_opts_df_val = create_empty_df(self.eval_unrolls)
-
-        self.frac_solved_df_list_train, self.frac_solved_df_list_test = [], []
-        for i in range(len(self.frac_solved_accs)):
-            self.frac_solved_df_list_train.append(pd.DataFrame(columns=['iterations']))
-            self.frac_solved_df_list_test.append(pd.DataFrame(columns=['iterations']))
-        if not os.path.exists('frac_solved'):
-            os.mkdir('frac_solved')
 
         self.percentiles = [10, 20, 30, 40, 50, 60, 70, 80,
                             90, 95, 96, 97, 98, 99]

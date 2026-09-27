@@ -1,10 +1,8 @@
 import csv
 import gc
-import os
 import time
 from functools import partial
 
-import hydra
 import jax.numpy as jnp
 import jax.scipy as jsp
 import matplotlib.pyplot as plt
@@ -29,40 +27,12 @@ from lah_accel.lah_scs_model import LAHSCSmodel
 from lah_accel.osqp_model import OSQPmodel
 from lah_accel.scs_model import SCSmodel
 from lah_accel.utils.generic_utils import count_files_in_directory, sample_plot, setup_permutation
-from pandas import read_csv
 
 
 
 def geometric_mean(x):
     return jnp.exp(jnp.mean(jnp.log(jnp.clip(x, a_min=1e-10)), axis=0))
 
-
-def compute_kl_inv_vector(emp_risks, delta, N):
-    file_path = f"kl_inv_cache/kl_inv_delta_{delta}_Nval_{N}.csv"
-    orig_cwd = hydra.utils.get_original_cwd()
-
-    if os.path.exists(orig_cwd + '/' + file_path):
-        df = read_csv(orig_cwd + '/' + file_path)
-        all_kl_inv_vector = df['kl_inv'].to_numpy()
-
-        # convert to vector over the emp_risks (over K)
-        idx_map = (N * emp_risks).astype(int) 
-        kl_inv_vector = all_kl_inv_vector[idx_map]
-        # import pdb
-        # pdb.set_trace()
-    else:
-        # manually do it
-        raise ValueError(f"Invalid values: N should be {1000} and delta should be {0.0001}, but got N={N} and delta={delta}")
-        # kl_inv_vector = 0
-        # K = emp_risks.size
-        # kl_inv_vector = np.zeros(K)
-        # for i in range(K):
-        #     # check if file exists
-        #     # kl_inv = compute_kl_inv()
-            
-        #         print("File exists.")
-        #     kl_inv_vector[i] = kl_inv
-    return kl_inv_vector
 
 
 
