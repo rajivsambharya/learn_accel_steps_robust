@@ -51,6 +51,7 @@ class L2Omodel(object):
             jax.config.update('jax_disable_jit', True)
         self.pep_regularizer_coeff = pep_regularizer_coeff
         self.pep_target = pep_target
+        self.delta = pac_bayes_cfg.get('delta', 1e-5)
         dict = algo_dict
         self.key = 0
 
@@ -272,6 +273,8 @@ class L2Omodel(object):
             curr_loss_fn = self.loss_fn_eval_conj_grad
         elif tag == 'adam':
             curr_loss_fn = self.loss_fn_eval_adam
+        elif tag == 'bb':
+            curr_loss_fn = self.loss_fn_eval_bb
         elif tag == 'backtracking':
             curr_loss_fn = self.loss_fn_eval_backtracking
         num_probs, _ = inputs.shape

@@ -2,15 +2,15 @@ nn_cfg:
   lr: 1e-2
   method: adam
   batch_size: 100
-  epochs: 2000 #400
+  epochs: 10 #2000
 
 
 data:
   datetime: ''
 
-step_varying_num: 100
-train_unrolls: 40
-eval_unrolls: 10000
+step_varying_num: 40 #100
+train_unrolls: 40 #40
+eval_unrolls: 100 #10000
 eval_every_x_epochs: 100 #00
 save_every_x_epochs: 1
 test_every_x_epochs: 1

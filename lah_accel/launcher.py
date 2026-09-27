@@ -1480,6 +1480,8 @@ class Workspace:
             elif self.l2ws_model.algo == 'lah_accel_logisticgd' or self.l2ws_model.algo == 'lah_gd_accel':
                 # adam
                 self.eval_iters_train_and_test('adam', None)
+                # barzilai-borwein
+                self.eval_iters_train_and_test('bb', None)
 
 
             # prev sol eval
@@ -1597,12 +1599,19 @@ class Workspace:
             # if accel is not None and accel:
             #     break # no progressive training
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
-        self.get_confidence_bands()            
+
+        # robustness polishing step (Section 4.3): certify gamma(theta_final) <= pep_target
+        if self.l2ws_model.algo == 'lah_accel_logisticgd' and \
+                self.l2ws_model.pep_target is not None:
+            self.l2ws_model.robustness_polish()
+            self.eval_iters_train_and_test("robustness_polished", None)
+
+        self.get_confidence_bands()
         
 
     def get_confidence_bands(self):
         # do the final evaluation
-        out_train = self.evaluate_iters(self.num_samples_test, 'final', train=False)
+        out_train = self.evaluate_iters(self.num_samples_test, 'final', train='test')
 
         if len(out_train) == 6 or len(out_train) == 8:
             primal_residuals = out_train[4] #.mean(axis=0)
@@ -1634,10 +1643,15 @@ class Workspace:
                 emp_success_rates = fs.mean(axis=0) # a vector over the iterations
                 emp_risks = 1 - emp_success_rates  # a vector over the iterations
 
-                upper_risk_bounds = compute_kl_inv_vector(emp_risks, self.l2ws_model.delta, 
-                                                        self.N_val)
-                lower_risk_bounds = 1 - compute_kl_inv_vector(emp_success_rates, self.l2ws_model.delta, 
+                try:
+                    upper_risk_bounds = compute_kl_inv_vector(emp_risks, self.l2ws_model.delta,
                                                             self.N_val)
+                    lower_risk_bounds = 1 - compute_kl_inv_vector(emp_success_rates, self.l2ws_model.delta,
+                                                                self.N_val)
+                except ValueError as e:
+                    print(f"skipping confidence bands for {metric_name} "
+                          f"(accuracy={self.frac_solved_accs[i]}): {e}")
+                    continue
                 if not os.path.exists(f"frac_solved_{metric_name}"):
                     os.mkdir(f"frac_solved_{metric_name}")
                 filename = f"frac_solved_{metric_name}/tol={self.frac_solved_accs[i]}"

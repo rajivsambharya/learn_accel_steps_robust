@@ -3,7 +3,7 @@ from functools import partial
 import cvxpy as cp
 import jax.numpy as jnp
 import jax.scipy as jsp
-from jax import grad, lax, vmap
+from jax import debug, grad, lax, vmap
 from jax.tree_util import tree_map
 
 from lah_accel.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
@@ -806,9 +806,9 @@ def compute_gradient(X, y, y_hat):
     return dw, db
 
 
-def fixed_point_logistic_bb(z, z_prev, grad_prev, X, y, eta0):
+def fixed_point_logistic_bb(z, z_prev, grad_prev, X, y, eta0, t):
     w, b = z[:-1], z[-1]
-    logits = jnp.clip(X @ w + b, -20, 20)
+    logits = jnp.clip(X @ w + b, -10, 10)
     y_hat = sigmoid(logits)
     dw, db = compute_gradient(X, y, y_hat)
     grad = jnp.hstack([dw, db])
@@ -817,10 +817,22 @@ def fixed_point_logistic_bb(z, z_prev, grad_prev, X, y, eta0):
     yk = grad - grad_prev
     ss = jnp.dot(s, s)
     sy = jnp.dot(s, yk)
+    yy = jnp.dot(yk, yk)
 
     # BB1 (long) step: alpha = ||s||^2 / (s^T y); fall back to eta0 when sy <= 0
-    alpha = jnp.where(sy > 1e-14, ss / sy, eta0)
-    alpha = jnp.clip(alpha, 1e-10, 1e3)
+    alpha_bb1 = jnp.where(sy > 1e-14, ss / sy, eta0)
+    alpha_bb1 = jnp.clip(alpha_bb1, 1e-10, 1e5)
+
+    # BB2 (short) step: alpha = (s^T y) / ||y||^2; fall back to eta0 when yy <= 0
+    alpha_bb2 = jnp.where(yy > 1e-14, sy / yy, eta0)
+    alpha_bb2 = jnp.clip(alpha_bb2, 1e-10, 1e5)
+
+    # alternate: BB1 on even iterations, BB2 on odd
+    # alpha = jnp.where(t % 2 == 0, alpha_bb1, alpha_bb2)
+    alpha = alpha_bb1
+
+    debug.print("BB iter={t}  alpha_bb1={bb1}  alpha_bb2={bb2}  alpha={a}",
+                t=t, bb1=alpha_bb1, bb2=alpha_bb2, a=alpha)
 
     z_next = z - alpha * grad
     return z_next, grad
@@ -828,7 +840,7 @@ def fixed_point_logistic_bb(z, z_prev, grad_prev, X, y, eta0):
 
 def fp_eval_logistic_bb(i, val, supervised, z_star, X, y_label, eta0):
     z, z_prev, grad_prev, t, loss_vec, z_all, obj_diffs = val
-    z_next, grad_next = fixed_point_logistic_bb(z, z_prev, grad_prev, X, y_label, eta0)
+    z_next, grad_next = fixed_point_logistic_bb(z, z_prev, grad_prev, X, y_label, eta0, t)
     t_next = t + 1
 
     diff = jnp.linalg.norm(z - z_star) if supervised else jnp.linalg.norm(z_next - z)

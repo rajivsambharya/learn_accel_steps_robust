@@ -5,7 +5,7 @@ from jax import random, vmap
 
 import numpy as np
 
-from lah_accel.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic, k_steps_eval_logistic_backtracking
+from lah_accel.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic, k_steps_eval_logistic_backtracking, k_steps_eval_logistic_bb
 from lah_accel.l2o_model import L2Omodel
 from PEPit.functions import SmoothStronglyConvexFunction
 import cvxpy as cp
@@ -48,13 +48,16 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_nesterov_logisticgd, num_points=num_points,
                                        jit=self.jit)
-        # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=0.001, beta1=0.9, beta2=0.99, epsilon=1e-8,
+        # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=0.01, beta1=0.9, beta2=0.99, epsilon=1e-8,
         #                                jit=self.jit)
-        # self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
-        #                                jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_logistic_backtracking, num_points=num_points, eta0=1.0,
+        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.1,
                                        jit=self.jit)
-        
+        # self.adam_eval_fn = partial(k_steps_eval_logistic_backtracking, num_points=num_points, eta0=1.0,
+        #                                jit=self.jit)
+        # self.bb_eval_fn = partial(k_steps_eval_logistic_bb, num_points=num_points,
+        #                           eta0=1.0 / self.smooth_param, jit=self.jit)
+        self.bb_eval_fn = partial(k_steps_eval_logistic_bb, num_points=num_points,
+                                  eta0=0.001, jit=self.jit)
 
         self.out_axes_length = 5
 
@@ -68,8 +71,10 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
                                                special_algo='silver')
-        self.loss_fn_eval_adam = e2e_loss_fn(bypass_nn=False, diff_required=False, 
+        self.loss_fn_eval_adam = e2e_loss_fn(bypass_nn=False, diff_required=False,
                                                special_algo='adam')
+        self.loss_fn_eval_bb = e2e_loss_fn(bypass_nn=False, diff_required=False,
+                                            special_algo='bb')
 
         self.num_const_steps = input_dict.get('num_const_steps', 1)
 
@@ -80,6 +85,81 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         
     def pepit_nesterov_check(self, params):
         return pepit_nesterov(0, self.smooth_param._value, params)
+
+
+    def nesterov_base_params(self, num_iters):
+        """theta_base: standard (non strongly convex) Nesterov's method, step size 1/L,
+        with a certified PEP guarantee (Proposition 1)."""
+        step_sizes = (1.0 / self.smooth_param) * jnp.ones(num_iters)
+
+        t_vals = [1.0]
+        t = 1.0
+        for _ in range(num_iters):
+            t = (1.0 + np.sqrt(1.0 + 4.0 * t ** 2)) / 2.0
+            t_vals.append(t)
+        beta_vals = convert_t_to_beta(jnp.array(t_vals))[:num_iters]
+
+        return jnp.stack([step_sizes, beta_vals], axis=1)
+
+
+    def robustness_polish(self, num_iters=None, gamma_target=None, tol=1e-3, verbose=True):
+        """
+        Robustness polishing step (Section 4.3): bisect tau in theta(tau) =
+        tau * theta_learned + (1 - tau) * theta_base until the PEP-certified
+        worst-case gamma(theta(tau)) <= gamma_target, then set theta_final =
+        theta(tau_lo). Since tau_lo is only ever advanced to certified values,
+        starting from the certified theta(0) = theta_base, the result satisfies
+        gamma(theta_final) <= gamma_target regardless of gamma(theta_learned).
+        Mutates self.params[0] in place (log-parameterized) and returns
+        (tau_final, gamma_final).
+        """
+        if num_iters is None:
+            num_iters = self.num_pep_iters
+        if gamma_target is None:
+            gamma_target = self.pep_target
+        if gamma_target is None:
+            raise ValueError("robustness_polish requires pep_target to be set")
+
+        theta_base = self.nesterov_base_params(num_iters)
+        theta_learned = jnp.exp(self.params[0][:num_iters, :])
+
+        gamma_learned = self.pepit_nesterov_check(np.array(theta_learned))
+        if verbose:
+            print(f"robustness polish: gamma(theta_learned)={gamma_learned:.6g}, "
+                  f"target={gamma_target:.6g}")
+        if gamma_learned <= gamma_target:
+            # already certified; leave theta_learned untouched
+            return 1.0, gamma_learned
+
+        gamma_base = self.pepit_nesterov_check(np.array(theta_base))
+        if gamma_base > gamma_target:
+            raise RuntimeError(
+                f"theta_base does not certify at target={gamma_target}: "
+                f"gamma(theta_base)={gamma_base}")
+
+        tau_lo, tau_hi = 0.0, 1.0
+        gamma_lo = gamma_base
+        num_bisect = int(np.ceil(np.log2(1.0 / tol)))
+        for _ in range(num_bisect):
+            tau_mid = 0.5 * (tau_lo + tau_hi)
+            theta_mid = tau_mid * theta_learned + (1 - tau_mid) * theta_base
+            gamma_mid = self.pepit_nesterov_check(np.array(theta_mid))
+            if verbose:
+                print(f"robustness polish: tau={tau_mid:.6f} gamma={gamma_mid:.6g}")
+            if gamma_mid <= gamma_target:
+                tau_lo, gamma_lo = tau_mid, gamma_mid
+            else:
+                tau_hi = tau_mid
+
+        theta_final = tau_lo * theta_learned + (1 - tau_lo) * theta_base
+        self.params[0] = self.params[0].at[:num_iters, :].set(
+            jnp.log(jnp.clip(theta_final, a_min=1e-12)))
+
+        if verbose:
+            print(f"robustness polish: tau_final={tau_lo:.6f} gamma_final={gamma_lo:.6g} "
+                  f"(target={gamma_target:.6g})")
+
+        return tau_lo, gamma_lo
 
 
     def compute_single_gradient(self, z, q):
@@ -220,12 +300,20 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
                 angles = None
             elif special_algo == 'adam':
-                
+
                 eval_out = self.adam_eval_fn(k=iters,
                                    z0=z0,
                                    q=q,
                                    supervised=supervised,
                                    z_star=z_star)
+                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
+                angles = None
+            elif special_algo == 'bb':
+                eval_out = self.bb_eval_fn(k=iters,
+                                           z0=z0,
+                                           q=q,
+                                           supervised=supervised,
+                                           z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
                 angles = None
             else:
