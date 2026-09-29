@@ -4,6 +4,7 @@ import cvxpy as cp
 import yaml
 from lah_accel.launcher import Workspace
 from lah_accel.examples.solve_script import ista_setup_script
+from lah_accel.utils.generic_utils import gram_evals
 import os
 from scipy.sparse import random
 
@@ -39,7 +40,7 @@ def run_lista(run_cfg):
     
 
     # get the ista values
-    evals, evecs = jnp.linalg.eigh(D.T @ D)
+    evals = gram_evals(jnp.array(D))
     step = 1 / evals.max()
     lambd = .1
     eta = lambd * step
@@ -89,12 +90,14 @@ def run(run_cfg, model='lah'):
 
     D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
     A = jnp.array(D / np.linalg.norm(D, axis=0))
-    
-    evals, evecs = jnp.linalg.eigh(A.T @ A)
+
+    # pass evals along so the model doesn't redo this eigendecomposition
+    evals = gram_evals(A)
     ista_step =  1 / evals.max()
     lambd = setup_cfg['lambd']
 
-    static_dict = dict(A=A, lambd=lambd, ista_step=ista_step, accel=run_cfg.accel)
+    static_dict = dict(A=A, lambd=lambd, ista_step=ista_step, evals=evals,
+                       accel=run_cfg.accel)
 
     # we directly save q now
     static_flag = True
@@ -159,7 +162,8 @@ def setup_probs(setup_cfg):
 
     
     # b_mat[:ood_num] = b_mat[:ood_num] * 2
-    ista_setup_script(b_mat, D, lambd, output_filename, ood_num=ood_num)
+    ista_setup_script(b_mat, D, lambd, output_filename, ood_num=ood_num,
+                      eps_abs=cfg.solve_acc_abs, eps_rel=cfg.solve_acc_rel)
     # jnp.savez(
     #     output_filename,
     #     thetas=jnp.array(b_mat),

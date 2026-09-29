@@ -317,7 +317,9 @@ def fp_train_lah_nonneg_gd_accel(i, val, supervised, z_star, A, c, nonneg_gd_ste
     z_next, y_next, t_next = fixed_point_nonneg_gd_accel(z, y, nonneg_gd_steps[i,1], A, c, nonneg_gd_steps[i,0])
     diff = jnp.linalg.norm(z_next - z_star) ** 2
     # diff = jnp.linalg.norm(z_next - z) ** 2
-    obj = .5 * jnp.linalg.norm(A @ z - c) ** 2
+    # measure the gap at z_next, not z: with the pre-update iterate, loss_vec[k-1]
+    # would be f(z_{k-1}) - f* and the last step size would get no gradient
+    obj = .5 * jnp.linalg.norm(A @ z_next - c) ** 2
     opt_obj = .5 * jnp.linalg.norm(A @ z_star - c) ** 2
     
     if supervised:

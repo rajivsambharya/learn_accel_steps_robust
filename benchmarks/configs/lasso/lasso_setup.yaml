@@ -1,13 +1,13 @@
-m_orig: 250 #1000 #64
-n_orig: 500 #2000 #128
-solve_acc_abs: 1e-10
-solve_acc_rel: 0
-N_train: 10000
-N_test: 1000 #2100
+m_orig: 1000 #64
+n_orig: 2000 #128
+solve_acc_abs: 1e-6
+solve_acc_rel: 1e-6
+N_train: 100 #00
+N_test: 100 #0 #2100
 seed: 42
 solve: True
 SNR: 40 #40
 A_scale: 1
-lambd: .1
-N_ood: 1000
-ood_mult: 3.0
+lambd: 1 #.1
+N_ood: 100
+ood_mult: 10.0

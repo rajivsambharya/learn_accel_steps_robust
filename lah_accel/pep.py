@@ -14,7 +14,100 @@ from lah_accel.utils.generic_utils import python_fori_loop, unvec_symm, vec_symm
 from cvxpylayers.jax import CvxpyLayer
 import dill
 import os
+import time
 import hydra
+import importlib.util
+from functools import lru_cache
+
+
+# a pep solve is capped at PEP_SOLVE_TIMEOUT seconds by the solver itself;
+# PEP_WALL_TIMEOUT is a wall-clock backstop around the whole call (construction
+# included). anything slower is recorded as PEP_MAX_VAL.
+PEP_SOLVE_TIMEOUT = 30
+PEP_WALL_TIMEOUT = 90
+PEP_MAX_VAL = 99999
+# a capped or optimal_inaccurate solve is still accepted when its relative
+# duality gap and the psd violation of its Gram matrix are within these
+PEP_GAP_TOL = 1e-2
+PEP_EIG_TOL = 1e-3
+
+
+class PepSolveFailure(RuntimeError):
+    """the pep solve hit its time limit or otherwise failed to return a value"""
+
+
+@lru_cache(maxsize=1)
+def mosek_licensed():
+    """
+    whether a valid mosek license is available
+
+    pepit silently falls back to scs when it is not, so we have to know which
+    solver will actually run to pass it the right time-limit option
+    """
+    if importlib.util.find_spec("mosek") is None:
+        return False
+    try:
+        import mosek
+        env = mosek.Env()
+        try:
+            env.checkoutlicense(mosek.feature.pton)
+        except mosek.Error:
+            pass
+        return env.expirylicenses() >= 0
+    except Exception:
+        return False
+
+
+def pep_solver_kwargs(timeout_seconds=PEP_SOLVE_TIMEOUT):
+    """solver choice plus its own wall-clock cap, so a pep solve cannot run away"""
+    if mosek_licensed():
+        return dict(solver=cp.MOSEK,
+                    mosek_params={'MSK_DPAR_OPTIMIZER_MAX_TIME': float(timeout_seconds)})
+    return dict(solver=cp.SCS, time_limit_secs=float(timeout_seconds))
+
+
+def pep_solution_accurate(problem, pepit_tau, gap_tol=PEP_GAP_TOL, eig_tol=PEP_EIG_TOL):
+    """
+    whether a pep solve that did not finish cleanly is still accurate enough to use
+
+    compares the dual bound pepit returns against the solver's primal value, and
+    checks how far the Gram matrix is from positive semi-definite
+    """
+    prob = getattr(getattr(problem, 'wrapper', None), 'prob', None)
+    primal = getattr(prob, 'value', None)
+    G = getattr(problem, 'G_value', None)
+    if pepit_tau is None or primal is None or G is None:
+        return False
+    if not (np.isfinite(pepit_tau) and np.isfinite(primal)):
+        return False
+    rel_gap = abs(pepit_tau - primal) / max(1.0, abs(primal))
+    min_eig = np.linalg.eigvalsh((G + G.T) / 2).min()
+    print(f'pep accuracy check: relative gap {rel_gap:.3g}, min Gram eigenvalue {min_eig:.3g}')
+    return rel_gap <= gap_tol and min_eig >= -eig_tol
+
+
+def check_pep_solved(problem, elapsed, pepit_tau=None, timeout_seconds=PEP_SOLVE_TIMEOUT):
+    """
+    raise PepSolveFailure unless the pep solve finished cleanly, or its value is
+    accurate enough to use anyway (see pep_solution_accurate)
+
+    a solver stopped by its own time limit still returns a number, which can be
+    built from a badly infeasible Gram matrix -- so the value is checked on the
+    status, the elapsed time and its accuracy rather than on an exception
+    """
+    status = getattr(getattr(problem, 'wrapper', None), 'prob', None)
+    status = getattr(status, 'status', None)
+    if elapsed >= timeout_seconds:
+        reason = f"pep solve hit the {timeout_seconds}s limit ({elapsed:.1f}s)"
+    elif status is not None and status != 'optimal':
+        reason = f"pep solve returned status {status!r}"
+    else:
+        return
+    if status in ('optimal', 'optimal_inaccurate') and pep_solution_accurate(problem, pepit_tau):
+        print(f'{reason}, but the solution is accurate enough; keeping it')
+        return
+    raise PepSolveFailure(reason)
+
 
 def pepit_fixed_point_anderson(params):
     """
@@ -297,8 +390,9 @@ def pepit_accel_gd(mu, L, params, quad, prox, obj):
     verbose = 1
     pepit_verbose = max(verbose, 0)
     try:
-        pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
-        # pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.SCS)
+        solve_start = time.time()
+        pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs())
+        check_pep_solved(problem, time.time() - solve_start, pepit_tau)
     except Exception as e:
         print('exception', e)
         pepit_tau = np.inf
@@ -406,10 +500,7 @@ def check_cache(filepath, prob, parameters, variables, cache=True, save=True):
     # Save
     if save:
         # if os.path.exists(filepath):
-        orig_cwd = hydra.utils.get_original_cwd()
-        layers_folder = f'{orig_cwd}/layers'
-        if not os.path.exists(layers_folder):
-            os.mkdir(layers_folder)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'wb') as f:
             dill.dump(cvxpylayer, f)
 
@@ -486,10 +577,9 @@ def build_A_matrix_prox_with_xstar(alpha_list, beta_list):
 
         # Build y_i and y_{i-1}
         y_ip1 = x_i.at[idx_g(i)].add(-alpha_list[i]).at[idx_s(i+1)].add(-alpha_list[i])
-        if i == 0:
-            y_i = x_i
-        else:
-            y_i = A[i+k]
+        # i is a traced fori_loop index, so this has to be a select rather than
+        # a python branch -- otherwise this only works under jax_disable_jit
+        y_i = jnp.where(i == 0, x_i, A[i + k])
 
         x_ip1 = (1 + beta_list[i]) * y_ip1 - beta_list[i] * y_i
         return A.at[i + 1].set(x_ip1).at[i+k+1].set(y_ip1)
@@ -695,7 +785,7 @@ def create_quad_pep_sdp_layer(mu, L, num_iters):
     return cvxpylayer
 
 
-def create_quadprox_pep_sdp_layer(mu, L, num_iters):
+def create_quadprox_pep_sdp_layer(mu, L, num_iters, cache=True, save=True):
     """
     create cvxpylayer for quadratic + proximal min: min_z (1/2) z^T Q z + h(z) 
     result will be in terms of distance to optimality
@@ -767,9 +857,9 @@ def create_quadprox_pep_sdp_layer(mu, L, num_iters):
 
     prob = cp.Problem(objective, constraints)
     
-    cvxpylayer = CvxpyLayer(prob, parameters=[A], variables=[G, H])
-    
-    return cvxpylayer
+    orig_cwd = hydra.utils.get_original_cwd()
+    filepath = f'{orig_cwd}/layers/quadprox_nesterov/{mu:.4f}_{L:.3f}_{num_iters}.dill'
+    return check_cache(filepath, prob, [A], [G, H], cache=cache, save=save)
     
 
 

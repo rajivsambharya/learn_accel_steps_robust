@@ -581,10 +581,18 @@ def plot_step_sizes(example, cfg):
         pdb.set_trace()
         
     
+def resolve_datetime(example, dt):
+    """An empty datetime means: use the most recent train_outputs run for this example."""
+    if not dt:
+        orig_cwd = hydra.utils.get_original_cwd()
+        dt = recover_last_datetime(orig_cwd, example, 'train')
+    return dt
+
+
 def get_lah_gd_step_size(example, cfg):
     step_sizes_dict = {}
     for method in cfg.methods:
-        dt = cfg.methods[method]
+        dt = resolve_datetime(example, cfg.methods[method])
         step_sizes_dict[method] = get_step_sizes(example, dt, method)
     return step_sizes_dict
 
@@ -847,7 +855,7 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
         if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
         # if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
-        if method in ['backtracking', 'lista', 'l2ws']: #, 'l2ws10000']:
+        if method in ['backtracking', 'lista', 'l2ws', 'bb']: #, 'l2ws10000']:
             continue
 
         style = titles_2_styles[method]
@@ -974,6 +982,8 @@ def method2col(method):
         col = 'prev_sol'
     elif method == 'backtracking':
         col = 'backtracking'
+    elif method == 'bb':
+        col = 'bb'
     else:
         col = 'last'
     return col
@@ -1017,7 +1027,7 @@ def populate_curr_method_dict(method, example, cfg, constrained, split='test'):
     assert split in ['test', 'val'], "split must be either 'test' or 'val'"
 
     # get the datetime
-    dt = cfg['methods'][method]
+    dt = resolve_datetime(example, cfg['methods'][method])
 
     # get the column
     col = method2col(method)
@@ -1162,6 +1172,8 @@ def get_eval_array(df, title):
         data = df['prev_sol']
     elif title == 'backtracking':
         data = df['backtracking']
+    elif title == 'bb':
+        data = df['bb']
     elif title == 'l2ws':
         data = df.iloc[:, -1]
     elif title == 'l2ws10000':

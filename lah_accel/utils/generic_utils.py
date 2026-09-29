@@ -1,4 +1,6 @@
 import os
+import signal
+from contextlib import contextmanager
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -137,3 +139,38 @@ def python_fori_loop(lower, upper, body_fun, init_val):
     for i in range(lower, upper):
         val = body_fun(i, val)
     return val
+
+
+def gram_evals(A):
+    """
+    ascending eigenvalues of A.T @ A
+
+    for wide A (m < n) this eigendecomposes the m x m matrix A @ A.T instead:
+    it has the same nonzero eigenvalues, and the remaining n - m are zero.
+    saves a lot of time when n is large (e.g. lasso with n = 2000)
+    """
+    m, n = A.shape
+    if m >= n:
+        return jnp.linalg.eigvalsh(A.T @ A)
+    return jnp.concatenate([jnp.zeros(n - m), jnp.linalg.eigvalsh(A @ A.T)])
+
+
+@contextmanager
+def time_limit(seconds):
+    """
+    raise TimeoutError if the wrapped block runs longer than `seconds`
+
+    uses SIGALRM, so it only works on the main thread of a unix process, and the
+    alarm is only delivered once control returns to the interpreter -- a long call
+    inside a C extension can overshoot the limit
+    """
+    def handler(signum, frame):
+        raise TimeoutError(f"timed out after {seconds} seconds")
+
+    old_handler = signal.signal(signal.SIGALRM, handler)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)

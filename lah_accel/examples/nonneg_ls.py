@@ -8,6 +8,31 @@ import os
 from scipy.sparse import random
 
 
+def build_A(setup_cfg):
+    """
+    build the measurement matrix
+
+    data setup and training each construct A independently, so they have to
+    agree exactly -- the seeding lives here rather than at the call sites
+
+    A_density is the fraction of entries that are nonzero (1.0 = dense)
+    """
+    np.random.seed(setup_cfg['seed'])
+    m_orig, n_orig = setup_cfg['m_orig'], setup_cfg['n_orig']
+    density = setup_cfg.get('A_density', 1.0)
+
+    D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
+    if density < 1.0:
+        D = D * (np.random.rand(m_orig, n_orig) < density)
+
+    col_norms = np.linalg.norm(D, axis=0)
+    if col_norms.min() == 0:
+        raise ValueError(f"A_density={density} produced an all-zero column at "
+                         f"({m_orig}, {n_orig}); raise A_density or m_orig")
+    return jnp.array(D / col_norms)
+
+
+
 def run(run_cfg, model='lah'):
     example = "nonneg_ls"
     data_yaml_filename = 'data_setup_copied.yaml'
@@ -21,11 +46,9 @@ def run(run_cfg, model='lah'):
             setup_cfg = {}
 
     # set the seed
-    np.random.seed(setup_cfg['seed'])
     m_orig, n_orig = setup_cfg['m_orig'], setup_cfg['n_orig']
 
-    D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
-    A = jnp.array(D / np.linalg.norm(D, axis=0))
+    A = build_A(setup_cfg)
     
 
     static_dict = dict(A=A, accel=run_cfg.accel)
@@ -56,11 +79,9 @@ def run_l2ws(run_cfg):
             setup_cfg = {}
 
     # set the seed
-    np.random.seed(setup_cfg['seed'])
     m_orig, n_orig = setup_cfg['m_orig'], setup_cfg['n_orig']
 
-    D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
-    A = jnp.array(D / np.linalg.norm(D, axis=0))
+    A = build_A(setup_cfg)
     
 
     static_dict = dict(A=A, accel=run_cfg.accel)
@@ -91,9 +112,7 @@ def setup_probs(setup_cfg):
     # ista_step = 1 / evals.max()
     # lambd = setup_cfg['lambd']
 
-    np.random.seed(cfg.seed)
-    D = np.random.normal(size=(m_orig, n_orig)) / np.sqrt(m_orig)
-    A = jnp.array(D / np.linalg.norm(D, axis=0))
+    A = build_A(setup_cfg)
     # P = A.T @ A
 
     # z_orig = np.random.normal(size=(N, n_orig))
@@ -128,7 +147,8 @@ def setup_probs(setup_cfg):
 
     
     # b_mat[:ood_num] = b_mat[:ood_num] * 2
-    nonneg_ls_setup_script(c_mat, theta_mat, A, output_filename)
+    nonneg_ls_setup_script(c_mat, theta_mat, A, output_filename,
+                           eps_abs=cfg.solve_acc_abs, eps_rel=cfg.solve_acc_rel)
     # jnp.savez(
     #     output_filename,
     #     thetas=jnp.array(b_mat),

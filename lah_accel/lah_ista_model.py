@@ -1,4 +1,5 @@
 from functools import partial
+import time
 
 import jax.numpy as jnp
 from jax import random
@@ -8,6 +9,7 @@ import numpy as np
 from lah_accel.algo_steps_ista import k_steps_eval_lah_ista, k_steps_train_lah_ista, k_steps_eval_fista, k_steps_eval_lah_fista, k_steps_train_lah_fista, k_steps_eval_lasso_backtracking, k_steps_eval_lasso_nesterov_backtracking, k_steps_eval_fista_backtracking__
 from lah_accel.l2o_model import L2Omodel
 from lah_accel.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
+from lah_accel.utils.generic_utils import gram_evals
 
 from jax import vmap, jit
 import cvxpy as cp
@@ -18,7 +20,9 @@ from PEPit.functions import SmoothStronglyConvexFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
-from lah_accel.pep import create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar, pepit_nesterov
+from lah_accel.pep import (create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar,
+                          pepit_nesterov, pep_solver_kwargs, check_pep_solved,
+                          PepSolveFailure)
 
 
 class LAHISTAmodel(L2Omodel):
@@ -46,7 +50,10 @@ class LAHISTAmodel(L2Omodel):
         # self.ista_step = lambd / evals.max()
         # p = jnp.diag(P)
         # cond_num = jnp.max(p) / jnp.min(p)
-        evals, evecs = jnp.linalg.eigh(A.T @ A)
+        # reuse the eigenvalues if the example already computed them
+        evals = input_dict.get('evals')
+        if evals is None:
+            evals = gram_evals(A)
         self.evals = evals
 
         self.str_cvx_param = jnp.min(evals)
@@ -547,7 +554,7 @@ class LAHISTAmodel(L2Omodel):
 
                 if n_iters == 1:
                     # for steady_state training
-                    stochastic_params = 2 / self.smooth_param * sigmoid(params[0][:n_iters, 0])
+                    stochastic_params = 2 / self.smooth_param * sigmoid(params[0][:n_iters, :])
                 else:
                     # for step-varying training
                     # params[0] = params[0].at[-1,0].set()
@@ -691,10 +698,17 @@ class LAHISTAmodel(L2Omodel):
         verbose = 1
         pepit_verbose = max(verbose, 0)
         try:
-            pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+            # the solver gets its own wall-clock cap; a capped solve is rejected
+            # by check_pep_solved and reported as a failure rather than as the
+            # perfect rate of 0
+            solve_start = time.time()
+            pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs())
+            check_pep_solved(problem, time.time() - solve_start, pepit_tau)
+        except TimeoutError:
+            raise
         except Exception as e:
             print('exception', e)
-            pepit_tau = 0
+            raise PepSolveFailure(f"pep solve failed or timed out: {e}") from e
 
         # Compute theoretical guarantee (for comparison)
         n = num_iters
@@ -714,6 +728,79 @@ class LAHISTAmodel(L2Omodel):
 
         # Return the worst-case guarantee of the evaluated method ( and the reference theoretical value)
         return pepit_tau, theoretical_tau
+
+    def fista_base_params(self, num_iters):
+        """theta_base: standard FISTA (accelerated proximal gradient), step size 1/L,
+        with a certified PEP guarantee (Proposition 1)."""
+        step_sizes = (1.0 / self.smooth_param) * jnp.ones(num_iters)
+
+        t_vals = [1.0]
+        t = 1.0
+        for _ in range(num_iters):
+            t = (1.0 + np.sqrt(1.0 + 4.0 * t ** 2)) / 2.0
+            t_vals.append(t)
+        beta_vals = convert_t_to_beta(jnp.array(t_vals))[:num_iters]
+
+        return jnp.stack([step_sizes, beta_vals], axis=1)
+
+    def robustness_polish(self, num_iters=None, gamma_target=None, tol=1e-3, verbose=True):
+        """
+        Robustness polishing step (Section 4.3): bisect tau in theta(tau) =
+        tau * theta_learned + (1 - tau) * theta_base until the PEP-certified
+        worst-case gamma(theta(tau)) <= gamma_target, then set theta_final =
+        theta(tau_lo). Since tau_lo is only ever advanced to certified values,
+        starting from the certified theta(0) = theta_base, the result satisfies
+        gamma(theta_final) <= gamma_target regardless of gamma(theta_learned).
+        Mutates self.params[0] in place (log-parameterized) and returns
+        (tau_final, gamma_final).
+        """
+        if num_iters is None:
+            num_iters = self.num_pep_iters
+        if gamma_target is None:
+            gamma_target = self.pep_target
+        if gamma_target is None:
+            raise ValueError("robustness_polish requires pep_target to be set")
+
+        theta_base = self.fista_base_params(num_iters)
+        theta_learned = jnp.exp(self.params[0][:num_iters, :])
+
+        gamma_learned = self.pepit_nesterov_check(np.array(theta_learned))[0]
+        if verbose:
+            print(f"robustness polish: gamma(theta_learned)={gamma_learned:.6g}, "
+                  f"target={gamma_target:.6g}")
+        if gamma_learned <= gamma_target:
+            # already certified; leave theta_learned untouched
+            return 1.0, gamma_learned
+
+        gamma_base = self.pepit_nesterov_check(np.array(theta_base))[0]
+        if gamma_base > gamma_target:
+            raise RuntimeError(
+                f"theta_base does not certify at target={gamma_target}: "
+                f"gamma(theta_base)={gamma_base}")
+
+        tau_lo, tau_hi = 0.0, 1.0
+        gamma_lo = gamma_base
+        num_bisect = int(np.ceil(np.log2(1.0 / tol)))
+        for _ in range(num_bisect):
+            tau_mid = 0.5 * (tau_lo + tau_hi)
+            theta_mid = tau_mid * theta_learned + (1 - tau_mid) * theta_base
+            gamma_mid = self.pepit_nesterov_check(np.array(theta_mid))[0]
+            if verbose:
+                print(f"robustness polish: tau={tau_mid:.6f} gamma={gamma_mid:.6g}")
+            if gamma_mid <= gamma_target:
+                tau_lo, gamma_lo = tau_mid, gamma_mid
+            else:
+                tau_hi = tau_mid
+
+        theta_final = tau_lo * theta_learned + (1 - tau_lo) * theta_base
+        self.params[0] = self.params[0].at[:num_iters, :].set(
+            jnp.log(jnp.clip(theta_final, a_min=1e-12)))
+
+        if verbose:
+            print(f"robustness polish: tau_final={tau_lo:.6f} gamma_final={gamma_lo:.6g} "
+                  f"(target={gamma_target:.6g})")
+
+        return tau_lo, gamma_lo
 
     def calculate_total_penalty(self, N_train, params, c, b, delta):
         return 0

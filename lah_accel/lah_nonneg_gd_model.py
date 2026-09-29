@@ -60,7 +60,7 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         #                                 jit=self.jit)
         # self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
         #                                jit=self.jit)
-        self.accel = False #input_dict['accel']
+        self.accel = input_dict['accel']
         self.supervised = not self.accel
         if self.accel or True:
             self.k_steps_train_fn = partial(k_steps_train_lah_nonneg_gd_accel,  A=A,
@@ -84,11 +84,16 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(10)
         # self.pep_layer = self.create_quad_prox_pep_sdp_layer(self.train_unrolls)
         # self.pep_layer = self.create_nesterov_pep_sdp_layer(self.train_unrolls)
-        self.num_pep_iters = 20 #self.train_unrolls
+        # must match the number of rows the loss passes to pep_cvxpylayer,
+        # which is train_unrolls -- a hardcoded value silently mismatches the layer
+        self.num_pep_iters = self.train_unrolls
 
-        # e2e_loss_fn = self.create_end2end_loss_fn
-        # self.pep_layer = create_proxgd_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
-        # self.pep_layer = create_quadprox_pep_sdp_layer(self.str_cvx_param, self.smooth_param, self.num_pep_iters)
+        # the pep layer is only needed when the regularizer is switched on, and
+        # canonicalizing it is expensive, so build it lazily
+        self.pep_layer = None
+        if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
+            self.pep_layer = create_quadprox_pep_sdp_layer(
+                float(self.str_cvx_param), float(self.smooth_param), self.num_pep_iters)
 
         # end-to-end loss fn for silver evaluation
         e2e_loss_fn = self.create_end2end_loss_fn
@@ -142,6 +147,94 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         # return G[2*k+2, 2*k+2] ** .5
         return G[3*k + 7, 3*k + 7] - 2*G[3*k + 7, 1] + G[1, 1]
 
+    def accel_gd_base_params(self, num_iters):
+        """
+        theta_base: accelerated projected gradient for a mu-strongly-convex,
+        L-smooth objective -- step 1/L with the constant momentum
+        (sqrt(kappa)-1)/(sqrt(kappa)+1). this is the certified starting point
+        the polish step falls back to.
+        """
+        kappa = self.smooth_param / self.str_cvx_param
+        step_sizes = (1.0 / self.smooth_param) * jnp.ones(num_iters)
+        beta_vals = ((kappa ** .5 - 1) / (kappa ** .5 + 1)) * jnp.ones(num_iters)
+        return jnp.stack([step_sizes, beta_vals], axis=1)
+
+    def robustness_polish(self, num_iters=None, gamma_target=None, tol=1e-3, verbose=True):
+        """
+        Robustness polishing step (Section 4.3): bisect tau in theta(tau) =
+        tau * theta_learned + (1 - tau) * theta_base until the PEP-certified
+        worst-case gamma(theta(tau)) <= gamma_target, then set theta_final =
+        theta(tau_lo). tau_lo only ever advances to certified values, starting
+        from theta(0) = theta_base, so the result satisfies the target whatever
+        gamma(theta_learned) is. Mutates self.params[0] in place (the params are
+        log-parameterized) and returns (tau_final, gamma_final).
+
+        Unlike the LAHISTAmodel version this does not raise when theta_base
+        itself misses the target -- it warns and keeps whichever endpoint
+        (theta_learned or theta_base) has the smaller gamma. Raising would throw
+        away a completed training run at the very last step.
+        """
+        if num_iters is None:
+            num_iters = self.num_pep_iters
+        if gamma_target is None:
+            gamma_target = self.pep_target
+        if gamma_target is None:
+            raise ValueError("robustness_polish requires pep_target to be set")
+
+        theta_base = self.accel_gd_base_params(num_iters)
+        theta_learned = jnp.exp(self.params[0][:num_iters, :])
+
+        def gamma(theta):
+            return self.pepit_nesterov_check(np.array(theta))
+
+        def commit(theta):
+            self.params[0] = self.params[0].at[:num_iters, :].set(
+                jnp.log(jnp.clip(theta, a_min=1e-12)))
+
+        gamma_learned = gamma(theta_learned)
+        if verbose:
+            print(f"robustness polish: gamma(theta_learned)={gamma_learned:.6g}, "
+                  f"target={gamma_target:.6g}")
+        if gamma_learned <= gamma_target:
+            # already certified; leave theta_learned untouched
+            return 1.0, gamma_learned
+
+        gamma_base = gamma(theta_base)
+        if gamma_base > gamma_target:
+            # neither endpoint certifies, so bisection has nothing to anchor on;
+            # keep whichever endpoint has the smaller worst-case bound
+            if gamma_learned <= gamma_base:
+                tau_final, gamma_final = 1.0, gamma_learned
+            else:
+                tau_final, gamma_final = 0.0, gamma_base
+                commit(theta_base)
+            print(f"robustness polish: WARNING theta_base does not certify at "
+                  f"target={gamma_target:.6g} (gamma(theta_base)={gamma_base:.6g}); "
+                  f"keeping {'theta_learned' if tau_final == 1.0 else 'theta_base'} "
+                  f"(gamma={gamma_final:.6g}), the more robust endpoint. "
+                  f"raise pep_target to at least {min(gamma_learned, gamma_base):.6g} "
+                  f"to make the target reachable.")
+            return tau_final, gamma_final
+
+        tau_lo, tau_hi = 0.0, 1.0
+        gamma_lo = gamma_base
+        for _ in range(int(np.ceil(np.log2(1.0 / tol)))):
+            tau_mid = 0.5 * (tau_lo + tau_hi)
+            theta_mid = tau_mid * theta_learned + (1 - tau_mid) * theta_base
+            gamma_mid = gamma(theta_mid)
+            if verbose:
+                print(f"robustness polish: tau={tau_mid:.6f} gamma={gamma_mid:.6g}")
+            if gamma_mid <= gamma_target:
+                tau_lo, gamma_lo = tau_mid, gamma_mid
+            else:
+                tau_hi = tau_mid
+
+        commit(tau_lo * theta_learned + (1 - tau_lo) * theta_base)
+        if verbose:
+            print(f"robustness polish: tau_final={tau_lo:.6f} gamma_final={gamma_lo:.6g} "
+                  f"(target={gamma_target:.6g})")
+        return tau_lo, gamma_lo
+
     def init_params(self):
         # k = self.step_varying_num
         k = self.eval_unrolls
@@ -178,7 +271,10 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
     
 
     def create_end2end_loss_fn(self, bypass_nn, diff_required, special_algo='gd'):
-        supervised = self.supervised  # self.supervised and diff_required
+        # accelerated runs train on the objective gap, not distance to z_star.
+        # self.supervised is set by initialize_algo but then overwritten by
+        # create_all_loss_fns with cfg.supervised, so derive it from accel here.
+        supervised = not self.accel
         loss_method = self.loss_method
 
         @partial(jit, static_argnames=['iters', 'key'])

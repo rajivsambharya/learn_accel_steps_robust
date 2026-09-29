@@ -64,7 +64,8 @@ from lah_accel.launcher_writer import (
 from lah_accel.osqp_model import OSQPmodel
 from lah_accel.scs_model import SCSmodel
 from scipy.spatial import distance_matrix
-from lah_accel.utils.generic_utils import setup_permutation
+from lah_accel.utils.generic_utils import setup_permutation, time_limit
+from lah_accel.pep import PEP_WALL_TIMEOUT, PEP_MAX_VAL
 from jax import vmap
 from lah_accel.utils.mpc_utils import closed_loop_rollout
 
@@ -98,9 +99,11 @@ class Workspace:
 
         self.num_samples_test = cfg.get('num_samples_test', self.num_samples)
         self.num_samples_train = cfg.get('num_samples_train', self.num_samples_test)
+        self.num_samples_val = cfg.get('num_samples_val', self.num_samples_test)
 
         self.eval_batch_size_test = cfg.get('eval_batch_size_test', self.num_samples_test)
         self.eval_batch_size_train = cfg.get('eval_batch_size_train', self.num_samples_train)
+        self.eval_batch_size_val = cfg.get('eval_batch_size_val', self.num_samples_val)
 
         self.key_count = 0
         self.save_weights_flag = cfg.get('save_weights_flag', False)
@@ -446,6 +449,7 @@ class Workspace:
                           c_mat_test=self.q_mat_test,
                           lambd=lambd,
                           A=A,
+                          evals=static_dict.get('evals'),
                           accel=static_dict['accel']
                           )
         self.l2ws_model = LAHISTAmodel(train_unrolls=self.train_unrolls,
@@ -470,7 +474,8 @@ class Workspace:
         input_dict = dict(algorithm='nonneg_gd_accel',
                           c_mat_train=self.q_mat_train,
                           c_mat_test=self.q_mat_test,
-                         A=A
+                         A=A,
+                          accel=static_dict['accel']
                           )
         self.l2ws_model = LAHNONNEGGDAccelmodel(train_unrolls=self.train_unrolls,
                                      eval_unrolls=self.eval_unrolls,
@@ -542,7 +547,8 @@ class Workspace:
                           c_mat_train=self.q_mat_train,
                           c_mat_test=self.q_mat_test,
                           lambd=lambd,
-                          A=A
+                          A=A,
+                          evals=static_dict.get('evals')
                           )
         self.l2ws_model = LMISTAmodel(train_unrolls=self.train_unrolls,
                                        eval_unrolls=self.eval_unrolls,
@@ -1258,7 +1264,12 @@ class Workspace:
             fixed_ws = True
 
         # do the actual evaluation (most important step in thie method)
-        eval_batch_size = self.eval_batch_size_train if train == 'train' else self.eval_batch_size_test
+        if train == 'train':
+            eval_batch_size = self.eval_batch_size_train
+        elif train == 'val':
+            eval_batch_size = self.eval_batch_size_val
+        else:
+            eval_batch_size = self.eval_batch_size_test
 
         # val = col == 'final'
         
@@ -1492,13 +1503,17 @@ class Workspace:
         num_epochs_jit = int(self.l2ws_model.epochs / self.epochs_jit)
         loop_size = int(self.l2ws_model.num_batches * self.epochs_jit)
 
-        # acceleration methods (e.g. lah_accel_logisticgd) don't have a separate
-        # steady-state phase: training just covers step_varying_num and stops,
-        # then robustness_polish handles the end-of-training certification.
-        has_steady_state_phase = self.l2ws_model.algo != 'lah_accel_logisticgd'
-        num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls)
-        if has_steady_state_phase:
-            num_progressive_trains += 1
+        # acceleration methods (e.g. lah_accel_logisticgd, accelerated lah_ista,
+        # accelerated lah_nonneg_gd) don't train progressively: a single window
+        # covers the first train_unrolls steps with no separate steady-state
+        # phase, then robustness_polish handles the end-of-training certification.
+        accel_method = self.l2ws_model.algo == 'lah_accel_logisticgd' or \
+            (self.l2ws_model.algo in ('lah_ista', 'lah_nonneg_gd') and self.l2ws_model.accel)
+        has_steady_state_phase = not accel_method
+        if accel_method:
+            num_progressive_trains = 1
+        else:
+            num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls) + 1
 
         for window in range(num_progressive_trains):
             # update window_indices
@@ -1590,8 +1605,9 @@ class Workspace:
         self.eval_iters_train_and_test(f"train_epoch_{epoch}_final", None)
 
         # robustness polishing step (Section 4.3): certify gamma(theta_final) <= pep_target
-        if self.l2ws_model.algo == 'lah_accel_logisticgd' and \
-                self.l2ws_model.pep_target is not None:
+        pep_regularized = self.l2ws_model.pep_regularizer_coeff is not None and \
+            self.l2ws_model.pep_regularizer_coeff > 0
+        if accel_method and pep_regularized and self.l2ws_model.pep_target is not None:
             self.l2ws_model.robustness_polish()
             self.eval_iters_train_and_test("robustness_polished", None)
 
@@ -1686,7 +1702,11 @@ class Workspace:
         try:
             # import pdb
             # pdb.set_trace()
-            pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
+            # the solver caps itself (PEP_SOLVE_TIMEOUT); this is the backstop
+            # covering pep construction too. either way a slow solve is recorded
+            # as PEP_MAX_VAL rather than holding up training
+            with time_limit(PEP_WALL_TIMEOUT):
+                pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:self.l2ws_model.num_pep_iters,:])))
             # pep_loss  = self.l2ws_model.pepit_nesterov_check(np.array(jnp.exp(self.l2ws_model.params[0][:40,:])))
             print('PEPLOSS', pep_loss)
             
@@ -1702,13 +1722,13 @@ class Workspace:
                 pep_df = pd.read_csv(self.pep_filename)
             except FileNotFoundError:
                 pep_df = pd.DataFrame(columns=['col', 'pep_val'])
-            write_pep(pep_df, self.pep_filename, col, 99999)
+            write_pep(pep_df, self.pep_filename, col, PEP_MAX_VAL)
         
         self.evaluate_iters(
             self.num_samples_test, col, train='test')
         if self.val:
             self.evaluate_iters(
-                self.num_samples_test, col, train='val')
+                self.num_samples_val, col, train='val')
         out_train = self.evaluate_iters(
             self.num_samples_train, col, train='train')
         

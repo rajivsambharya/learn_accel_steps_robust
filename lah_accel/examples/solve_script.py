@@ -281,7 +281,8 @@ def osqp_setup_script(theta_mat, q_mat, P, A, output_filename, z_stars=None):
     plt.clf()
 
 
-def ista_setup_script(b_mat, A, lambd, output_filename, ood_num, box=None):
+def ista_setup_script(b_mat, A, lambd, output_filename, ood_num, box=None,
+                      eps_abs=1e-9, eps_rel=1e-9, max_iter=int(1e6)):
     # def solve_many_probs_cvxpy(A, b_mat, lambd):
     """
     solves many lasso problems where each problem has a different b vector
@@ -299,7 +300,7 @@ def ista_setup_script(b_mat, A, lambd, output_filename, ood_num, box=None):
     for i in range(N):
         print('solving problem', i)
         b_param.value = np.array(b_mat[i, :])
-        prob.solve(verbose=True, solver=cp.CLARABEL) #, eps_abs=1e-9, eps_rel=1e-9)
+        prob.solve(verbose=True, solver=cp.OSQP, eps_abs=eps_abs, eps_rel=eps_rel, max_iter=max_iter)
         objvals = objvals.at[i].set(prob.value)
         z_stars = z_stars.at[i, :].set(jnp.array(z.value))
         solve_times[i] = prob.solver_stats.solve_time
@@ -350,7 +351,8 @@ def ista_setup_script(b_mat, A, lambd, output_filename, ood_num, box=None):
 
 
 
-def nonneg_ls_setup_script(b_mat, theta_mat, A, output_filename, box=None):
+def nonneg_ls_setup_script(b_mat, theta_mat, A, output_filename, box=None,
+                           eps_abs=1e-9, eps_rel=1e-9, max_iter=int(1e6)):
     # def solve_many_probs_cvxpy(A, b_mat, lambd):
     """
     solves many lasso problems where each problem has a different b vector
@@ -365,8 +367,13 @@ def nonneg_ls_setup_script(b_mat, theta_mat, A, output_filename, box=None):
     for i in range(N):
         print('solving problem', i)
         b_param.value = np.array(theta_mat[i, :])
-        # prob.solve(verbose=True, eps_abs=1e-9, eps_rel=1e-9) #, solver=cp.CLARABEL) #, eps_abs=1e-9, eps_rel=1e-9)
-        prob.solve(verbose=True, solver=cp.CLARABEL) #, eps_abs=1e-9, eps_rel=1e-9)
+        # warm_start=False is essential: the problem object is reused across
+        # instances, and warm-starting from the previous solution lets osqp stop
+        # early at a slightly infeasible z (negative entries ~1e-5). such a z
+        # scores BELOW the true constrained optimum, which puts a spurious
+        # positive floor under every f(z_k) - f(z_star) curve downstream.
+        prob.solve(verbose=True, solver=cp.OSQP, warm_start=False,
+                   eps_abs=eps_abs, eps_rel=eps_rel, max_iter=max_iter)
         objvals = objvals.at[i].set(prob.value)
         z_stars = z_stars.at[i, :].set(jnp.array(z.value))
         solve_times[i] = prob.solver_stats.solve_time
@@ -400,7 +407,7 @@ def nonneg_ls_setup_script(b_mat, theta_mat, A, output_filename, box=None):
 
     # save plot of first 5 parameters
     for i in range(5):
-        plt.plot(b_mat[i, :])
+        plt.plot(theta_mat[i, :])
     plt.savefig("thetas.pdf")
     plt.clf()
     return z_stars

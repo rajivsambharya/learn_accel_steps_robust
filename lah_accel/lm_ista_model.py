@@ -8,6 +8,7 @@ import numpy as np
 from lah_accel.algo_steps_ista import k_steps_eval_lm_ista, k_steps_train_lm_ista
 from lah_accel.l2o_model import L2Omodel
 from lah_accel.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
+from lah_accel.utils.generic_utils import gram_evals
 from lah_accel.lah_gd_model import sigmoid
 
 
@@ -35,7 +36,10 @@ class LMISTAmodel(L2Omodel):
         # self.ista_step = lambd / evals.max()
         # p = jnp.diag(P)
         # cond_num = jnp.max(p) / jnp.min(p)
-        evals, evecs = jnp.linalg.eigh(A.T @ A)
+        # reuse the eigenvalues if the example already computed them
+        evals = input_dict.get('evals')
+        if evals is None:
+            evals = gram_evals(A)
 
         self.str_cvx_param = jnp.min(evals)
         self.smooth_param = jnp.max(evals)
