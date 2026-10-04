@@ -18,7 +18,7 @@ from PEPit.functions import SmoothStronglyConvexFunction
 from PEPit.functions import ConvexFunction, ConvexIndicatorFunction
 from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
-from lah_accel.pep import create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar, pepit_nesterov, create_quadprox_pep_sdp_layer, pepit_accel_gd
+from lah_accel.pep import create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar, pepit_nesterov, create_quadprox_pep_sdp_layer, pepit_accel_gd, PEP_SOLVE_TIMEOUT, PEP_POLISH_TIMEOUT
 
 
 class LAHNONNEGGDAccelmodel(L2Omodel):
@@ -147,16 +147,21 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         # return G[2*k+2, 2*k+2] ** .5
         return G[3*k + 7, 3*k + 7] - 2*G[3*k + 7, 1] + G[1, 1]
 
-    def accel_gd_base_params(self, num_iters):
+    def gd_base_params(self, num_iters):
         """
-        theta_base: accelerated projected gradient for a mu-strongly-convex,
-        L-smooth objective -- step 1/L with the constant momentum
-        (sqrt(kappa)-1)/(sqrt(kappa)+1). this is the certified starting point
-        the polish step falls back to.
+        theta_base: projected gradient descent with step 1/L and no momentum.
+        its PEP worst case (1 - mu/L)^num_iters contracts from the first step,
+        unlike constant-momentum acceleration whose worst case over a short
+        horizon can exceed 1. this is the certified point the polish step falls
+        back to.
+
+        the step is 1/L rather than the contraction-optimal 2/(L+mu) on purpose:
+        2/(L+mu) sits at the stability limit, so blending it with a learned
+        schedule that carries momentum gives steps that blow up in the worst
+        case (gamma unbounded for most of the segment), which breaks bisection.
         """
-        kappa = self.smooth_param / self.str_cvx_param
         step_sizes = (1.0 / self.smooth_param) * jnp.ones(num_iters)
-        beta_vals = ((kappa ** .5 - 1) / (kappa ** .5 + 1)) * jnp.ones(num_iters)
+        beta_vals = jnp.zeros(num_iters)
         return jnp.stack([step_sizes, beta_vals], axis=1)
 
     def robustness_polish(self, num_iters=None, gamma_target=None, tol=1e-3, verbose=True):
@@ -181,11 +186,14 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         if gamma_target is None:
             raise ValueError("robustness_polish requires pep_target to be set")
 
-        theta_base = self.accel_gd_base_params(num_iters)
+        theta_base = self.gd_base_params(num_iters)
         theta_learned = jnp.exp(self.params[0][:num_iters, :])
 
         def gamma(theta):
-            return self.pepit_nesterov_check(np.array(theta))
+            # a timed-out solve comes back as inf and is scored as uncertified,
+            # which is safe but shrinks the bracket below the target -- so the
+            # polish solves get a long cap
+            return self.pepit_nesterov_check(np.array(theta), timeout_seconds=PEP_POLISH_TIMEOUT)
 
         def commit(theta):
             self.params[0] = self.params[0].at[:num_iters, :].set(
@@ -390,8 +398,9 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         loss_fn = self.predict_2_loss(predict, diff_required)
         return loss_fn
     
-    def pepit_nesterov_check(self, params):
-        return pepit_accel_gd(self.str_cvx_param._value, self.smooth_param._value, params, True, True, 'dist')
+    def pepit_nesterov_check(self, params, timeout_seconds=PEP_SOLVE_TIMEOUT):
+        return pepit_accel_gd(self.str_cvx_param._value, self.smooth_param._value, params, True, True, 'dist',
+                              timeout_seconds=timeout_seconds)
         # return pepit_accel_gd(self.str_cvx_param._value, self.smooth_param._value, params, True, True, 'func')
     
         

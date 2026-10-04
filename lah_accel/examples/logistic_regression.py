@@ -9,6 +9,8 @@ import hydra
 import gzip
 import time
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.special import expit
 from emnist import extract_training_samples
 
 
@@ -122,8 +124,9 @@ def setup_probs(setup_cfg):
         X_train, X_test = X_binary[:train_size], X_binary[train_size:]
         y_train, y_test = y_binary[:train_size], y_binary[train_size:]
         
-        # Train logistic regression model
-        w, b = train_logistic_regression(X_train, y_train)
+        # solve to high accuracy; adam (train_logistic_regression) stops at a
+        # loss ~1e-5 above the optimum, which corrupts the objective gaps
+        w, b = solve_logistic_regression_lbfgs(X_train, y_train)
 
         # fill z_stars
         z_stars[i, :784] = w
@@ -236,6 +239,31 @@ def compute_gradient(X, y, y_hat):
     dw = 1/m * np.dot(X.T, (y_hat - y))
     db = 1/m * np.sum(y_hat - y)
     return dw, db
+
+
+def solve_logistic_regression_lbfgs(X, y):
+    """
+    minimize mean(log(1 + exp(z)) - y z), z = Xw + b, with L-BFGS to a loss
+    accuracy of ~1e-14.
+
+    with num_points <= 785 the data matrix [X, 1] has full row rank, so every
+    labeling is linearly separable: the loss has no minimizer and its infimum
+    is 0. the returned z is then a point whose loss is within ~1e-14 of that
+    infimum, which is what the objective gaps need -- not a unique solution
+    (so distances to it are not meaningful)
+    """
+    Xa = np.hstack([X, np.ones((X.shape[0], 1))])
+
+    def f(z):
+        logits = Xa @ z
+        return np.mean(np.logaddexp(0, logits) - y * logits)
+
+    def g(z):
+        return Xa.T @ (expit(Xa @ z) - y) / len(y)
+
+    res = minimize(f, np.zeros(Xa.shape[1]), jac=g, method='L-BFGS-B',
+                   options=dict(maxiter=20000, gtol=1e-14, ftol=1e-18))
+    return res.x[:-1], res.x[-1]
 
 
 def train_logistic_regression(X, y, learning_rate=0.02, beta1=0.9, beta2=0.999, epochs=2000, epsilon=1e-8):

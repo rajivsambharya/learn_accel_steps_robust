@@ -26,6 +26,10 @@ from functools import lru_cache
 PEP_SOLVE_TIMEOUT = 30
 PEP_WALL_TIMEOUT = 90
 PEP_MAX_VAL = 99999
+# the robustness polish runs once per training run, and a solve that times out
+# there is scored as uncertified, which quietly loosens the bisection -- so it
+# gets a much longer cap than the per-eval solves
+PEP_POLISH_TIMEOUT = 300
 # a capped or optimal_inaccurate solve is still accepted when its relative
 # duality gap and the psd violation of its Gram matrix are within these
 PEP_GAP_TOL = 1e-2
@@ -322,7 +326,7 @@ def pepit_nesterov(mu, L, params):
     # Return the worst-case guarantee of the evaluated method (and the reference theoretical value)
     return pepit_tau
 
-def pepit_accel_gd(mu, L, params, quad, prox, obj):
+def pepit_accel_gd(mu, L, params, quad, prox, obj, timeout_seconds=PEP_SOLVE_TIMEOUT):
     """
     params is an array of shape (num_iters, 2)
     - the first column is the vector of step sizes
@@ -391,8 +395,8 @@ def pepit_accel_gd(mu, L, params, quad, prox, obj):
     pepit_verbose = max(verbose, 0)
     try:
         solve_start = time.time()
-        pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs())
-        check_pep_solved(problem, time.time() - solve_start, pepit_tau)
+        pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs(timeout_seconds))
+        check_pep_solved(problem, time.time() - solve_start, pepit_tau, timeout_seconds=timeout_seconds)
     except Exception as e:
         print('exception', e)
         pepit_tau = np.inf

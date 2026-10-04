@@ -36,7 +36,7 @@ methods:
   # lah_accel_1: 2025-04-25/11-31-10
   # empty string = most recent train_outputs run for this example
   lah_accel_1: ''
-  bb: ''
+  bb: 2026-09-30/16-18-06
   backtracking: 2025-06-30/22-12-46
   nearest_neighbor: 2025-06-30/17-35-43
   nesterov: 2025-06-30/17-35-43

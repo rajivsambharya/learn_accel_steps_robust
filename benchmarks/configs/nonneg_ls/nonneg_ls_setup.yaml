@@ -1,5 +1,5 @@
-m_orig: 4000 #1000 #64
-n_orig: 3000 #2000 #128
+m_orig: 3500 #4000 #1000 #64
+n_orig: 2500 #3000 #2000 #128
 solve_acc_abs: 1e-7
 solve_acc_rel: 1e-7
 N_train: 10 #000

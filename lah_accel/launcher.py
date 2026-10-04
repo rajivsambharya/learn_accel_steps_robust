@@ -1474,7 +1474,9 @@ class Workspace:
             elif self.l2ws_model.algo == 'lah_accel_logisticgd' or self.l2ws_model.algo == 'lah_gd_accel':
                 # adam
                 self.eval_iters_train_and_test('adam', None)
-                # barzilai-borwein
+                # barzilai-borwein, with its initial step tuned on the training set
+                if hasattr(self.l2ws_model, 'tune_bb_eta0'):
+                    self.l2ws_model.tune_bb_eta0()
                 self.eval_iters_train_and_test('bb', None)
 
 

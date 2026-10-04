@@ -3,7 +3,7 @@ nn_cfg:
   lr: 3e-2
   method: adam
   batch_size: 100
-  epochs: 100 #00
+  epochs: 200 #00
 
 
 data:
@@ -11,7 +11,7 @@ data:
 
 step_varying_num: 10
 train_unrolls: 20
-eval_unrolls: 100
+eval_unrolls: 50 #100
 eval_every_x_epochs: 50
 save_every_x_epochs: 1
 test_every_x_epochs: 1
@@ -28,6 +28,6 @@ plot_iterates: [0, 10, 900]
 loss_method: 'fixed_k'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 10 #10 #10
-pep_target: 0.7
+pep_regularizer_coeff: 0.1 #10 #10 #10
+pep_target: 1.2
 accel: True #False
