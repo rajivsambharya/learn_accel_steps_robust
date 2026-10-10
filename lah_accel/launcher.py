@@ -1610,7 +1610,13 @@ class Workspace:
         pep_regularized = self.l2ws_model.pep_regularizer_coeff is not None and \
             self.l2ws_model.pep_regularizer_coeff > 0
         if accel_method and pep_regularized and self.l2ws_model.pep_target is not None:
-            self.l2ws_model.robustness_polish()
+            tau_final, gamma_final = self.l2ws_model.robustness_polish()
+            # theta_polished = tau * theta_learned + (1 - tau) * theta_base
+            pd.DataFrame([dict(tau=float(tau_final),
+                               gamma_final=float(gamma_final),
+                               pep_target=float(self.l2ws_model.pep_target),
+                               certified=bool(gamma_final <= self.l2ws_model.pep_target))]
+                         ).to_csv('polish_results.csv', index=False)
             self.eval_iters_train_and_test("robustness_polished", None)
 
         # do the final evaluation

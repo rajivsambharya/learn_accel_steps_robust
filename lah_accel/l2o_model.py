@@ -183,6 +183,13 @@ class L2Omodel(object):
         return loss_fn
 
 
+    def freeze_untrained_params(self, params):
+        """
+        hook for models to hold some parameter entries fixed during training
+        (by stopping their gradients); by default every entry is trained
+        """
+        return params
+
     def train_batch(self, batch_indices, inputs, params, state, n_iters):
         batch_inputs = inputs[batch_indices, :]
         batch_q_data = self.q_mat_train[batch_indices, :]
@@ -501,8 +508,11 @@ class L2Omodel(object):
             @partial(jit, static_argnames=['iters', 'key'])
             def loss_fn(params, inputs, b, iters, z_stars, key):
                 if diff_required:
+                    # entries the model holds fixed get no gradient from either
+                    # the training loss or the pep penalty
+                    params = self.freeze_untrained_params(params)
                     losses = batch_predict(params, inputs, b, iters, z_stars, key)
-                    
+
                     if self.pep_regularizer_coeff is not None and self.pep_regularizer_coeff > 0:
                         # update so that we have pep
                         pep_loss = self.pep_cvxpylayer(jnp.exp(params[0]))

@@ -9,7 +9,7 @@ from lah_accel.algo_steps_nonneg_gd import k_steps_eval_lah_nonneg_gd_accel, k_s
 from lah_accel.l2o_model import L2Omodel
 from lah_accel.utils.nn_utils import calculate_pinsker_penalty, compute_single_param_KL
 
-from jax import vmap, jit
+from jax import vmap, jit, lax
 import cvxpy as cp
 from cvxpylayers.jax import CvxpyLayer
 
@@ -146,6 +146,24 @@ class LAHNONNEGGDAccelmodel(L2Omodel):
         k = self.num_pep_iters
         # return G[2*k+2, 2*k+2] ** .5
         return G[3*k + 7, 3*k + 7] - 2*G[3*k + 7, 1] + G[1, 1]
+
+    def freeze_untrained_params(self, params):
+        """
+        hold the last momentum of the training window fixed at its initial
+        value, like the parameters past the window.
+
+        with K = train_unrolls steps, beta_{K-1} only builds y_K = x_K +
+        beta_{K-1} (x_K - x_{K-1}), which neither the training loss (measured
+        at x_K) nor the pep (worst case of ||x_K - x_*||) ever uses. its true
+        gradient is zero, but the pep layer's numerical one is solver noise,
+        which adam turns into full-size steps -- so it drifted, and it shapes
+        the uncertified iterations past K.
+        """
+        if not self.accel or params[0].shape[0] < 2:
+            return params
+        p = params[0]
+        p = p.at[-1, 1].set(lax.stop_gradient(p[-1, 1]))
+        return [p] + list(params[1:])
 
     def gd_base_params(self, num_iters):
         """
