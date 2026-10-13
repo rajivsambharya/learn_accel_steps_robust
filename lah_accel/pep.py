@@ -204,7 +204,7 @@ def pepit_fixed_point_anderson(params):
     return pepit_tau
 
 
-def pepit_fixed_point(params):
+def pepit_fixed_point(params, timeout_seconds=PEP_SOLVE_TIMEOUT):
     num_iters = params[:,0].size
     relaxation_sizes = params[:,0]
     averaged_sizes = relaxation_sizes / 2
@@ -242,10 +242,16 @@ def pepit_fixed_point(params):
     verbose = 1
     pepit_verbose = max(verbose, 0)
     try:
-        pepit_tau = problem.solve(verbose=pepit_verbose, solver=cp.MOSEK)
+        # a failed or capped solve is scored as inf (uncertified), not 0, which
+        # would read as a perfect worst-case bound
+        solve_start = time.time()
+        pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs(timeout_seconds))
+        check_pep_solved(problem, time.time() - solve_start, pepit_tau, timeout_seconds=timeout_seconds)
     except Exception as e:
         print('exception', e)
-        pepit_tau = 0
+        pepit_tau = np.inf
+    if pepit_tau is None:
+        pepit_tau = np.inf
     
     # Print conclusion if required
     verbose = 0
@@ -618,14 +624,14 @@ def build_A_matrix_op_with_xstar(alpha_list, beta_list):
 
     def body(i, A):
         x_i = A[i]
-        x_im1 = A[i - 1] if i > 0 else A[0]
+        x_im1 = A[i - 1]
 
         # Build y_i and y_{i-1}
         y_i = x_i - 0.5 * alpha_list[i] * (x_i.at[idx_q(i)].add(-1))
-        if i == 0:
-            y_im1 = x_im1 #x_im1.at[idx_g(i)].add(-alpha_list[i])
-        else:
-            y_im1 = x_im1 - 0.5 * alpha_list[i-1] * (x_im1.at[idx_q(i-1)].add(-1))
+        # i is a traced fori_loop index, so the i == 0 case has to be a select
+        # rather than a python branch (as in build_A_matrix_prox_with_xstar)
+        y_im1 = jnp.where(i == 0, x_i,
+                          x_im1 - 0.5 * alpha_list[i-1] * (x_im1.at[idx_q(i-1)].add(-1)))
 
         x_ip1 = (1 + beta_list[i]) * y_i - beta_list[i] * y_im1
         return A.at[i + 1].set(x_ip1)

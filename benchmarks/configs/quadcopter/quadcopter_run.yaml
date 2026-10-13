@@ -27,7 +27,7 @@ plot_iterates: [0, 20, 30, 40]
 loss_method: 'fixed_k'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 0 #10
+pep_regularizer_coeff: 1 #10
 pep_target: 0.1
 num_rollouts: 0 #5
 closed_loop_budget: 80

@@ -17,7 +17,7 @@ from lah_accel.algo_steps import (
 )
 from lah_accel.algo_steps_scs import k_steps_eval_lah_accel_scs, k_steps_train_lah_accel_scs
 from lah_accel.l2o_model import L2Omodel
-from lah_accel.pep import create_admm_pep_sdp_layer, pepit_fixed_point, build_A_matrix_op_with_xstar
+from lah_accel.pep import create_admm_pep_sdp_layer, pepit_fixed_point, build_A_matrix_op_with_xstar, PEP_SOLVE_TIMEOUT, PEP_POLISH_TIMEOUT
 
 
 class LAHAccelSCSmodel(L2Omodel):
@@ -100,11 +100,103 @@ class LAHAccelSCSmodel(L2Omodel):
 
         return G[2*k+2, 2*k+2] - 2*G[2*k+2, k+2] + G[k+2, k+2]
 
-    def pepit_nesterov_check(self, params):
-        # import pdb
-        # pdb.set_trace()
+    def pepit_nesterov_check(self, params, timeout_seconds=PEP_SOLVE_TIMEOUT):
+        # params is exp(self.params[0]); columns 2 (alpha) and 4 (beta) are
+        # stored raw, so take the log to undo the exp
         fp_params = np.vstack([jnp.log(params[:, 2]), jnp.log(params[:, 4])]).T
-        return pepit_fixed_point(fp_params)
+        return pepit_fixed_point(fp_params, timeout_seconds=timeout_seconds)
+
+    def drs_base_params(self, num_iters):
+        """
+        theta_base: plain douglas-rachford (relaxation alpha = 1, i.e. averaged
+        step 1/2 on the nonexpansive reflection) with no momentum. a
+        krasnoselskii-mann iteration, so its fixed-point residual is certified
+        to decrease from the first step. columns are (alpha, beta).
+        """
+        return jnp.stack([jnp.ones(num_iters), jnp.zeros(num_iters)], axis=1)
+
+    def robustness_polish(self, num_iters=None, gamma_target=None, tol=1e-3, verbose=True):
+        """
+        Robustness polishing step (Section 4.3): bisect tau in theta(tau) =
+        tau * theta_learned + (1 - tau) * theta_base until the PEP-certified
+        worst-case gamma(theta(tau)) <= gamma_target, then set theta_final =
+        theta(tau_lo). tau_lo only ever advances to certified values, starting
+        from theta(0) = theta_base, so the result satisfies the target whatever
+        gamma(theta_learned) is. Mutates self.params[0] in place and returns
+        (tau_final, gamma_final).
+
+        theta = (alpha, beta) are columns 2 and 4 of self.params[0], which are
+        stored raw (not log-parameterized). the rho columns set the single
+        factorization, i.e. the operator itself, so the polish leaves them alone.
+
+        If theta_base itself misses the target this does not raise -- it warns
+        and keeps whichever endpoint (theta_learned or theta_base) has the
+        smaller gamma. Raising would throw away a completed training run at the
+        very last step.
+        """
+        if num_iters is None:
+            num_iters = self.num_pep_iters
+        if gamma_target is None:
+            gamma_target = self.pep_target
+        if gamma_target is None:
+            raise ValueError("robustness_polish requires pep_target to be set")
+
+        theta_cols = jnp.array([2, 4])
+        theta_base = self.drs_base_params(num_iters)
+        theta_learned = self.params[0][:num_iters, theta_cols]
+
+        def gamma(theta):
+            # a failed or timed-out solve comes back as inf and is scored as
+            # uncertified, which is safe but shrinks the bracket below the
+            # target -- so the polish solves get a long cap
+            return pepit_fixed_point(np.array(theta), timeout_seconds=PEP_POLISH_TIMEOUT)
+
+        def commit(theta):
+            self.params[0] = self.params[0].at[:num_iters, theta_cols].set(theta)
+
+        gamma_learned = gamma(theta_learned)
+        if verbose:
+            print(f"robustness polish: gamma(theta_learned)={gamma_learned:.6g}, "
+                  f"target={gamma_target:.6g}")
+        if gamma_learned <= gamma_target:
+            # already certified; leave theta_learned untouched
+            return 1.0, gamma_learned
+
+        gamma_base = gamma(theta_base)
+        if gamma_base > gamma_target:
+            # neither endpoint certifies, so bisection has nothing to anchor on;
+            # keep whichever endpoint has the smaller worst-case bound
+            if gamma_learned <= gamma_base:
+                tau_final, gamma_final = 1.0, gamma_learned
+            else:
+                tau_final, gamma_final = 0.0, gamma_base
+                commit(theta_base)
+            print(f"robustness polish: WARNING theta_base does not certify at "
+                  f"target={gamma_target:.6g} (gamma(theta_base)={gamma_base:.6g}); "
+                  f"keeping {'theta_learned' if tau_final == 1.0 else 'theta_base'} "
+                  f"(gamma={gamma_final:.6g}), the more robust endpoint. "
+                  f"raise pep_target to at least {min(gamma_learned, gamma_base):.6g} "
+                  f"to make the target reachable.")
+            return tau_final, gamma_final
+
+        tau_lo, tau_hi = 0.0, 1.0
+        gamma_lo = gamma_base
+        for _ in range(int(np.ceil(np.log2(1.0 / tol)))):
+            tau_mid = 0.5 * (tau_lo + tau_hi)
+            theta_mid = tau_mid * theta_learned + (1 - tau_mid) * theta_base
+            gamma_mid = gamma(theta_mid)
+            if verbose:
+                print(f"robustness polish: tau={tau_mid:.6f} gamma={gamma_mid:.6g}")
+            if gamma_mid <= gamma_target:
+                tau_lo, gamma_lo = tau_mid, gamma_mid
+            else:
+                tau_hi = tau_mid
+
+        commit(tau_lo * theta_learned + (1 - tau_lo) * theta_base)
+        if verbose:
+            print(f"robustness polish: tau_final={tau_lo:.6f} gamma_final={gamma_lo:.6g} "
+                  f"(target={gamma_target:.6g})")
+        return tau_lo, gamma_lo
         
         
     def init_params(self):

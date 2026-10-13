@@ -22,7 +22,7 @@ from PEPit.operators import SymmetricLinearOperator
 from PEPit.primitive_steps import proximal_step
 from lah_accel.pep import (create_proxgd_pep_sdp_layer, build_A_matrix_prox_with_xstar,
                           pepit_nesterov, pep_solver_kwargs, check_pep_solved,
-                          PepSolveFailure)
+                          PepSolveFailure, PEP_SOLVE_TIMEOUT, PEP_POLISH_TIMEOUT)
 
 
 class LAHISTAmodel(L2Omodel):
@@ -653,7 +653,7 @@ class LAHISTAmodel(L2Omodel):
         return loss_fn
     
         
-    def pepit_nesterov_check(self, params):
+    def pepit_nesterov_check(self, params, timeout_seconds=PEP_SOLVE_TIMEOUT):
         num_iters = params[:,0].size
         step_sizes = params[:,0]
         beta_vals = params[:,1]
@@ -702,8 +702,9 @@ class LAHISTAmodel(L2Omodel):
             # by check_pep_solved and reported as a failure rather than as the
             # perfect rate of 0
             solve_start = time.time()
-            pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs())
-            check_pep_solved(problem, time.time() - solve_start, pepit_tau)
+            pepit_tau = problem.solve(verbose=pepit_verbose, **pep_solver_kwargs(timeout_seconds))
+            check_pep_solved(problem, time.time() - solve_start, pepit_tau,
+                             timeout_seconds=timeout_seconds)
         except TimeoutError:
             raise
         except Exception as e:
@@ -748,11 +749,15 @@ class LAHISTAmodel(L2Omodel):
         Robustness polishing step (Section 4.3): bisect tau in theta(tau) =
         tau * theta_learned + (1 - tau) * theta_base until the PEP-certified
         worst-case gamma(theta(tau)) <= gamma_target, then set theta_final =
-        theta(tau_lo). Since tau_lo is only ever advanced to certified values,
-        starting from the certified theta(0) = theta_base, the result satisfies
-        gamma(theta_final) <= gamma_target regardless of gamma(theta_learned).
-        Mutates self.params[0] in place (log-parameterized) and returns
-        (tau_final, gamma_final).
+        theta(tau_lo). tau_lo only ever advances to certified values, starting
+        from theta(0) = theta_base, so the result satisfies the target whatever
+        gamma(theta_learned) is. Mutates self.params[0] in place (the params are
+        log-parameterized) and returns (tau_final, gamma_final).
+
+        If theta_base itself misses the target this does not raise -- it warns
+        and keeps whichever endpoint (theta_learned or theta_base) has the
+        smaller gamma. Raising would throw away a completed training run at the
+        very last step.
         """
         if num_iters is None:
             num_iters = self.num_pep_iters
@@ -764,7 +769,22 @@ class LAHISTAmodel(L2Omodel):
         theta_base = self.fista_base_params(num_iters)
         theta_learned = jnp.exp(self.params[0][:num_iters, :])
 
-        gamma_learned = self.pepit_nesterov_check(np.array(theta_learned))[0]
+        def gamma(theta):
+            # a failed or timed-out solve is scored as inf, i.e. uncertified,
+            # which is safe but shrinks the bracket below the target -- so the
+            # polish solves get a long cap
+            try:
+                return self.pepit_nesterov_check(np.array(theta),
+                                                 timeout_seconds=PEP_POLISH_TIMEOUT)[0]
+            except PepSolveFailure as e:
+                print(f"robustness polish: pep solve failed ({e}); treating as uncertified")
+                return np.inf
+
+        def commit(theta):
+            self.params[0] = self.params[0].at[:num_iters, :].set(
+                jnp.log(jnp.clip(theta, a_min=1e-12)))
+
+        gamma_learned = gamma(theta_learned)
         if verbose:
             print(f"robustness polish: gamma(theta_learned)={gamma_learned:.6g}, "
                   f"target={gamma_target:.6g}")
@@ -772,19 +792,29 @@ class LAHISTAmodel(L2Omodel):
             # already certified; leave theta_learned untouched
             return 1.0, gamma_learned
 
-        gamma_base = self.pepit_nesterov_check(np.array(theta_base))[0]
+        gamma_base = gamma(theta_base)
         if gamma_base > gamma_target:
-            raise RuntimeError(
-                f"theta_base does not certify at target={gamma_target}: "
-                f"gamma(theta_base)={gamma_base}")
+            # neither endpoint certifies, so bisection has nothing to anchor on;
+            # keep whichever endpoint has the smaller worst-case bound
+            if gamma_learned <= gamma_base:
+                tau_final, gamma_final = 1.0, gamma_learned
+            else:
+                tau_final, gamma_final = 0.0, gamma_base
+                commit(theta_base)
+            print(f"robustness polish: WARNING theta_base does not certify at "
+                  f"target={gamma_target:.6g} (gamma(theta_base)={gamma_base:.6g}); "
+                  f"keeping {'theta_learned' if tau_final == 1.0 else 'theta_base'} "
+                  f"(gamma={gamma_final:.6g}), the more robust endpoint. "
+                  f"raise pep_target to at least {min(gamma_learned, gamma_base):.6g} "
+                  f"to make the target reachable.")
+            return tau_final, gamma_final
 
         tau_lo, tau_hi = 0.0, 1.0
         gamma_lo = gamma_base
-        num_bisect = int(np.ceil(np.log2(1.0 / tol)))
-        for _ in range(num_bisect):
+        for _ in range(int(np.ceil(np.log2(1.0 / tol)))):
             tau_mid = 0.5 * (tau_lo + tau_hi)
             theta_mid = tau_mid * theta_learned + (1 - tau_mid) * theta_base
-            gamma_mid = self.pepit_nesterov_check(np.array(theta_mid))[0]
+            gamma_mid = gamma(theta_mid)
             if verbose:
                 print(f"robustness polish: tau={tau_mid:.6f} gamma={gamma_mid:.6g}")
             if gamma_mid <= gamma_target:
@@ -792,14 +822,10 @@ class LAHISTAmodel(L2Omodel):
             else:
                 tau_hi = tau_mid
 
-        theta_final = tau_lo * theta_learned + (1 - tau_lo) * theta_base
-        self.params[0] = self.params[0].at[:num_iters, :].set(
-            jnp.log(jnp.clip(theta_final, a_min=1e-12)))
-
+        commit(tau_lo * theta_learned + (1 - tau_lo) * theta_base)
         if verbose:
             print(f"robustness polish: tau_final={tau_lo:.6f} gamma_final={gamma_lo:.6g} "
                   f"(target={gamma_target:.6g})")
-
         return tau_lo, gamma_lo
 
     def calculate_total_penalty(self, N_train, params, c, b, delta):

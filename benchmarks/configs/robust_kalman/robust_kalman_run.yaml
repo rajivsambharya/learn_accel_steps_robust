@@ -46,7 +46,7 @@ skip_startup: False
 step_varying_num: 20
 
 custom_loss: False
-algo: lah
+algo: lah_accel
 
-pep_regularizer_coeff: 0 #10
+pep_regularizer_coeff: 1000.0 #10
 pep_target: 0.1

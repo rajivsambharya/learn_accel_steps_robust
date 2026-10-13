@@ -1506,10 +1506,13 @@ class Workspace:
         loop_size = int(self.l2ws_model.num_batches * self.epochs_jit)
 
         # acceleration methods (e.g. lah_accel_logisticgd, accelerated lah_ista,
-        # accelerated lah_nonneg_gd) don't train progressively: a single window
-        # covers the first train_unrolls steps with no separate steady-state
-        # phase, then robustness_polish handles the end-of-training certification.
+        # accelerated lah_nonneg_gd, lah_accel_scs) don't train progressively: a
+        # single window covers the first train_unrolls steps with no separate
+        # steady-state phase, then robustness_polish handles the end-of-training
+        # certification. lah_accel_scs is checked on self.algo because its model
+        # reports algo 'lah_scs' (it shares the scs input handling).
         accel_method = self.l2ws_model.algo == 'lah_accel_logisticgd' or \
+            self.algo == 'lah_accel_scs' or \
             (self.l2ws_model.algo in ('lah_ista', 'lah_nonneg_gd') and self.l2ws_model.accel)
         has_steady_state_phase = not accel_method
         if accel_method:
