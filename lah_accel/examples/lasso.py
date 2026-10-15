@@ -97,7 +97,7 @@ def run(run_cfg, model='lah'):
     lambd = setup_cfg['lambd']
 
     static_dict = dict(A=A, lambd=lambd, ista_step=ista_step, evals=evals,
-                       accel=run_cfg.accel)
+                       accel=run_cfg.accel, safeguard=run_cfg.get('safeguard', True))
 
     # we directly save q now
     static_flag = True

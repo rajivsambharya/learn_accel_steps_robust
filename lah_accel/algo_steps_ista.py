@@ -75,7 +75,11 @@ def fp_train_lm_ista(i, val, supervised, z_star, lambd, A, c, ista_step):
     return z_next, loss_vec
 
 
-def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised, z_star, jit):
+def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised, z_star, jit, safeguard=True):
+    """
+    with safeguard, an iteration whose learned step increases the objective is
+    redone with safeguard_step; without it the learned steps run unchecked
+    """
     iter_losses = jnp.zeros(k)
     z_all_plus_1 = jnp.zeros((k + 1, z0.size))
     z_all_plus_1 = z_all_plus_1.at[0, :].set(z0)
@@ -87,24 +91,35 @@ def k_steps_eval_lah_ista(k, z0, q, params, lambd, A, safeguard_step, supervised
     #                           c=q,
     #                           ista_steps=params
     #                           )
-    fp_eval_partial = partial(fp_eval_lah_ista_safeguard,
-                              supervised=supervised,
-                              z_star=z_star,
-                              lambd=lambd,
-                              A=A,
-                              safeguard_step=safeguard_step,
-                              c=q,
-                              ista_steps=params
-                              )
     z_all = jnp.zeros((k, z0.size))
     obj_diffs = jnp.zeros(k)
-    val = z0, iter_losses, z_all, obj_diffs, False
+    if safeguard:
+        fp_eval_partial = partial(fp_eval_lah_ista_safeguard,
+                                  supervised=supervised,
+                                  z_star=z_star,
+                                  lambd=lambd,
+                                  A=A,
+                                  safeguard_step=safeguard_step,
+                                  c=q,
+                                  ista_steps=params
+                                  )
+        val = z0, iter_losses, z_all, obj_diffs, False
+    else:
+        fp_eval_partial = partial(fp_eval_lah_ista,
+                                  supervised=supervised,
+                                  z_star=z_star,
+                                  lambd=lambd,
+                                  A=A,
+                                  c=q,
+                                  ista_steps=params
+                                  )
+        val = z0, iter_losses, z_all, obj_diffs
     start_iter = 0
     if jit:
         out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
     else:
         out = python_fori_loop(start_iter, k, fp_eval_partial, val)
-    z_final, iter_losses, z_all, obj_diffs, iter = out
+    z_final, iter_losses, z_all, obj_diffs = out[:4]
     z_all_plus_1 = z_all_plus_1.at[1:, :].set(z_all)
     return z_final, iter_losses, z_all_plus_1, obj_diffs
 

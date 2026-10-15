@@ -3,7 +3,7 @@ nn_cfg:
   lr: 1e-2 #1
   method: adam
   batch_size: 100
-  epochs: 200 #4000
+  epochs: 2000 #4000
 
 
 data:
@@ -29,6 +29,9 @@ plot_iterates: [0, 10, 900]
 loss_method: 'fixed_k'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 0.001 #10
+pep_regularizer_coeff: 0 #0.001 #10
 pep_target: 0.1
-accel: True
+accel: False #True
+# fall back to a 1/L step whenever a learned step increases the objective
+# (evaluation only; ignored when accel is True)
+safeguard: False #True

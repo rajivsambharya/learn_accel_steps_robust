@@ -28,6 +28,6 @@ plot_iterates: [0, 10, 900]
 loss_method: 'fixed_k'
 accuracies: [.1, .01, .001, .0001]
 
-pep_regularizer_coeff: 1000 #0.1 #10 #10 #10
+pep_regularizer_coeff: 0 #1000 #0.1 #10 #10 #10
 pep_target: 0.9
-accel: True #False
+accel: False #True #False

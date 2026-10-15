@@ -77,8 +77,9 @@ class LAHISTAmodel(L2Omodel):
         else:
             self.k_steps_train_fn = partial(k_steps_train_lah_ista, lambd=lambd, A=A,
                                             jit=self.jit)
+            # the safeguard only exists for the non-accelerated method
             self.k_steps_eval_fn = partial(k_steps_eval_lah_ista, lambd=lambd, A=A, safeguard_step=safeguard_step,
-                                        jit=self.jit)
+                                        jit=self.jit, safeguard=input_dict.get('safeguard', True))
         self.backtracking_eval_fn = partial(k_steps_eval_fista_backtracking__, lambd=lambd, eta0=10.0, A=A,
                                        jit=self.jit)
 

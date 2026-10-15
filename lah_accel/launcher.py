@@ -450,7 +450,8 @@ class Workspace:
                           lambd=lambd,
                           A=A,
                           evals=static_dict.get('evals'),
-                          accel=static_dict['accel']
+                          accel=static_dict['accel'],
+                          safeguard=static_dict.get('safeguard', True)
                           )
         self.l2ws_model = LAHISTAmodel(train_unrolls=self.train_unrolls,
                                        eval_unrolls=self.eval_unrolls,
@@ -1506,13 +1507,14 @@ class Workspace:
         loop_size = int(self.l2ws_model.num_batches * self.epochs_jit)
 
         # acceleration methods (e.g. lah_accel_logisticgd, accelerated lah_ista,
-        # accelerated lah_nonneg_gd, lah_accel_scs) don't train progressively: a
-        # single window covers the first train_unrolls steps with no separate
-        # steady-state phase, then robustness_polish handles the end-of-training
-        # certification. lah_accel_scs is checked on self.algo because its model
-        # reports algo 'lah_scs' (it shares the scs input handling).
+        # accelerated lah_nonneg_gd, lah_accel_scs, lah_accel_osqp) don't train
+        # progressively: a single window covers the first train_unrolls steps
+        # with no separate steady-state phase, then robustness_polish handles the
+        # end-of-training certification. lah_accel_scs / lah_accel_osqp are
+        # checked on self.algo because their models report algo 'lah_scs' /
+        # 'lah_osqp' (they share the scs / osqp input handling).
         accel_method = self.l2ws_model.algo == 'lah_accel_logisticgd' or \
-            self.algo == 'lah_accel_scs' or \
+            self.algo in ('lah_accel_scs', 'lah_accel_osqp') or \
             (self.l2ws_model.algo in ('lah_ista', 'lah_nonneg_gd') and self.l2ws_model.accel)
         has_steady_state_phase = not accel_method
         if accel_method:
@@ -1773,8 +1775,10 @@ class Workspace:
 
     def evaluate_only(self, fixed_ws, num, train, col, batch_size, val=False):
         tag = 'train' if train else 'test'
-        # factors = None
-        if self.static_flag:
+        # only models that take precomputed per-problem factors get them; e.g.
+        # lah_accel_osqp has static_flag False but factors inside predict
+        model = self.l2ws_model
+        if self.static_flag or not (model.factors_required and not model.factor_static_bool):
             factors = None
         else:
             if train == 'train':
