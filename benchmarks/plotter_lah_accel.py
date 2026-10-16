@@ -273,7 +273,7 @@ def plot_step_sizes(example, cfg):
     for i in range(len(cfg.plot_step_sizes)):
         curr_entry = cfg.plot_step_sizes[i]
         step_sizes_list.append(step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 1])
-        if curr_entry == 'learned_no_accel':
+        if curr_entry in ['learned_no_accel', 'learned_no_accel_safeguard']:
             momentum_list.append(0 * step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 1])
         else:
             momentum_list.append(step_sizes_dict[curr_entry].to_numpy()[:cfg.step_size_iters, 2])
@@ -300,9 +300,9 @@ def plot_step_sizes(example, cfg):
         gamma_str = r"\infty" if np.isinf(worst_case_vals[i]) else f"{worst_case_vals[i]:.3f}"
         if curr_entry == 'nesterov':
             title = fr'Nesterov: $\gamma = {gamma_str}$'
-        elif curr_entry in ['lah_accel', 'lah_accel_1', 'lah_accel_2']:
+        elif curr_entry in ['lah_accel', 'lah_accel_1', 'lah_accel_2', 'lah_accel_3']:
             title = fr'LAH Accel: $\gamma = {gamma_str}$'
-        elif curr_entry == 'learned_no_accel':
+        elif curr_entry in ['learned_no_accel', 'learned_no_accel_safeguard']:
             title = fr'LAH: $\gamma = {gamma_str}$'
         titles.append(title)
     
@@ -311,12 +311,15 @@ def plot_step_sizes(example, cfg):
     step_size_iters = cfg.step_size_iters
     cmap = plt.cm.Set1
     colors = cmap.colors
-    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
+    num_panels = len(cfg.plot_step_sizes)
+    fig, axes = plt.subplots(nrows=1, ncols=num_panels, figsize=(6.75 * num_panels, 6), sharey='row') #, sharey=True)
     axes[0].set_ylabel('step sizes')
-    # axes[0].set_yscale('log')
+    if example == 'lasso':
+        # paper style for sparse coding: log-scale step sizes
+        axes[0].set_yscale('log')
     # axes[0].yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=2))
     # axes[0].xaxis.set_major_locator(ticker.LinearLocator(numticks=3))
-    for i in range(4):
+    for i in range(num_panels):
         axes[i].set_xlabel('iterations')
         axes[i].set_title(titles[i])
         axes[i].bar(np.arange(step_size_iters), step_sizes_list[i][:step_size_iters], color='black')
@@ -327,12 +330,12 @@ def plot_step_sizes(example, cfg):
     plt.clf()
     
 
-    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(27, 6), sharey='row') #, sharey=True)
+    fig, axes = plt.subplots(nrows=1, ncols=num_panels, figsize=(6.75 * num_panels, 6), sharey='row') #, sharey=True)
     axes[0].set_ylabel('momentum sizes')
     # axes[0].yaxis.set_major_locator(ticker.LinearLocator(numticks=4))
     # axes[0].set_yscale('log')
     # axes[0].xaxis.set_major_locator(ticker.LinearLocator(numticks=3))
-    for i in range(4):
+    for i in range(num_panels):
         axes[i].set_xlabel('iterations')
         axes[i].set_title(titles[i])
         axes[i].bar(np.arange(step_size_iters), momentum_list[i][:step_size_iters], color='black')
@@ -626,9 +629,12 @@ def read_step_size_data(dt_path, method):
         last_folder = find_last_folder_starting_with(f"{dt_path}/lah_weights", 'train_epoch')
         df = read_csv(f"{dt_path}/lah_weights/{last_folder}/params.csv") #read_csv(f"{dt_path}/lah_weights/silver/params.csv")
     elif method[:3] == 'lah':
-        # get all of the folder starting with 'train_epoch_...'
-        # all_train_epoch_folders = 
-        last_folder = find_last_folder_starting_with(f"{dt_path}/lah_weights", 'train_epoch')
+        # a run with the robustness polish is evaluated (the 'final' column) with
+        # the polished params, so plot those rather than the last trained ones
+        if os.path.isdir(f"{dt_path}/lah_weights/robustness_polished"):
+            last_folder = 'robustness_polished'
+        else:
+            last_folder = find_last_folder_starting_with(f"{dt_path}/lah_weights", 'train_epoch')
         df = read_csv(f"{dt_path}/lah_weights/{last_folder}/params.csv") #read_csv(f"{dt_path}/lah_weights/silver/params.csv")
     else:
         df = None
@@ -698,7 +704,9 @@ def create_lah_results_constrained(example, cfg):
 
     # do the plotting
     # plot_results_dict_constrained(results_dict, gains_dict, cfg.num_iters)
-    plot_results_dict_constrained(results_dict, {}, cfg.num_iters)
+    # methods in plot_exclude stay in the tables but are left off the plot
+    plot_results_dict_constrained(results_dict, {}, cfg.num_iters,
+                                  plot_exclude=cfg.get('plot_exclude', []))
 
     # create the tables (need the accuracies and reductions for this)
     create_acc_reduction_tables(accs_dict, acc_reductions_dict)
@@ -783,7 +791,7 @@ def create_acc_reduction_tables(accs_dict, acc_reductions_dict, split='test'):
 #     fig.tight_layout()
 #     plt.savefig('pr_dr.pdf', bbox_inches='tight')
 
-def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
+def plot_results_dict_constrained(results_dict, gains_dict, num_iters, plot_exclude=()):
     # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
@@ -805,6 +813,8 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters):
         if method == 'l2ws': # or and 'l2ws10000' in methods:
             continue
         if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
+            continue
+        if method in plot_exclude:
             continue
 
         style = titles_2_styles[method]
@@ -833,8 +843,12 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
     plt.xlabel('iterations')
-    # plt.title('objective suboptimality')
-    plt.ylabel('suboptimality')
+    if example == 'lasso':
+        # paper style for sparse coding: title, no y-label, ticks every 10 iterations
+        plt.title('objective suboptimality')
+        plt.xticks(np.arange(0, num_iters, 10))
+    else:
+        plt.ylabel('suboptimality')
     # if split == 'test':
     #     plt.title('in-distribution')
     # else:
@@ -864,11 +878,18 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
         mark_start = titles_2_marker_starts[method]
 
         # plot the values
+        curve = np.array(results_dict[method]['obj_diff'][:num_iters], dtype=float)
+        if split == 'val':
+            # out of distribution, a curve that reaches the plot ceiling (the
+            # recover_data clip) has diverged, so hold it there rather than
+            # showing a meaningless dip back down
+            diverged = np.maximum.accumulate(curve >= 1e10)
+            curve[diverged] = 1e10
         if example == 'logistic_regression':
-            plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,
+            plt.plot(curve, linestyle=style, marker=marker, color=color,
                      markevery=(0, 3))
         else:
-            plt.plot(results_dict[method]['obj_diff'][:num_iters], linestyle=style, marker=marker, color=color,  markevery=(0, 3))
+            plt.plot(curve, linestyle=style, marker=marker, color=color,  markevery=(0, 3))
                                     # markevery=(mark_start, markevery))
         
     # plt.locator_params(axis="y", nbins=5)   # works on the current Axes
@@ -1100,8 +1121,8 @@ def rkf_vis_ood_option(example, cfg, ood):
     rkf_lm_vis, _, __ = get_rkf_vis_data(example, cfg.lm_vis_dt, ood=ood, nn=True)
     # rkf_opt_vis = get_rkf_opt_data(example, cfg.lah_vis_dt)
     # rkf_thetas_vis = get_rkf_thetas_data(example, cfg.lah_vis_dt)
-    import pdb
-    pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
 
     T = 50
     num = thetas.shape[0] #300

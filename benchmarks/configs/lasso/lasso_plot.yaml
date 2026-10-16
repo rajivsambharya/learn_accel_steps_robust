@@ -1,18 +1,29 @@
-methods: 
-  lah_accel: 2025-05-21/11-18-43
-  # nearest_neighbor: 2025-06-04/13-51-48 #2025-05-21/13-12-53
-  nesterov: 2025-06-04/13-51-48 #2025-05-21/13-12-53
-  # lah_accel_1: 2025-05-21/13-12-53  #2025-05-22/13-24-54
-  lah_accel_3: 2025-05-21/13-12-53  #2025-05-22/13-24-54
-  # learned_no_accel_safeguard: 2025-05-22/13-24-54
-  # learned_no_accel: 2025-05-22/13-24-54 #2025-05-21/12-41-30
-  backtracking: 2025-06-04/13-51-48
-  # lista10000: 2025-06-25/18-59-26 #2025-06-09/16-49-15
-  # lista:  2025-06-25/18-56-49 #2025-06-09/15-47-45
-  l2ws: 2025-06-09/20-29-39
-  # l2ws10000: 2025-06-09/20-54-14
+# larger example: m_orig=1000, n_orig=2000 (all runs share the same data setup)
+# method names match the columns the paper's sparse coding table reads
+methods:
+  # baselines (the no_train column of an accel run is fista)
+  nesterov: 2026-10-10/17-23-01
+  nearest_neighbor: 2026-10-10/17-23-01
+  backtracking: 2026-10-10/17-23-01
+  # lah accel with no pep penalty (no robustness, gamma = inf)
+  lah_accel: 2026-10-10/12-18-28 #2026-10-10/14-08-00
+  # lah accel with the pep penalty (lambda = 0.1, pep_target = 0.1) + robustness polish
+  lah_accel_1: 2026-10-10/18-47-35 #2026-10-10/17-23-01 (lambda = 0.01)
+  # lah without acceleration: no safeguard / safeguarded
+  learned_no_accel: 2026-10-15/12-17-55
+  learned_no_accel_safeguard: 2026-10-15/11-42-31
 num_iters: 31
 step_size_iters: 30
+
+# previous (smaller, m_orig=250, n_orig=500) example
+# methods: 
+#   lah_accel: 2025-05-21/11-18-43
+#   nesterov: 2025-06-04/13-51-48
+#   lah_accel_3: 2025-05-21/13-12-53
+#   backtracking: 2025-06-04/13-51-48
+#   l2ws: 2025-06-09/20-29-39
+# num_iters: 31
+# step_size_iters: 30
 
 # methods: 
 #   lah_accel: 2025-05-21/11-18-43

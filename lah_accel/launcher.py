@@ -466,6 +466,29 @@ class Workspace:
                                        pep_target=cfg.pep_target,
                                        algo_dict=input_dict)
         
+    def create_lista_model(self, cfg, static_dict):
+        # restored: 670b920 accidentally renamed this method while adding
+        # create_lah_nonneg_gd_accel_model, which left algo == 'lista' broken
+        W, D = static_dict['W'], static_dict['D']
+
+        input_dict = dict(algorithm='lista',
+                          b_mat_train=self.q_mat_train,
+                          b_mat_test=self.q_mat_test,
+                          D=D,
+                          W=W,
+                          # the lambd the z_stars were solved with (setup cfg)
+                          lambd=static_dict['lambd']
+                          )
+        self.l2ws_model = LISTAmodel(train_unrolls=self.train_unrolls,
+                                     eval_unrolls=self.eval_unrolls,
+                                     train_inputs=self.train_inputs,
+                                     test_inputs=self.test_inputs,
+                                     regression=cfg.supervised,
+                                     nn_cfg=cfg.nn_cfg,
+                                     z_stars_train=self.z_stars_train,
+                                     z_stars_test=self.z_stars_test,
+                                     algo_dict=input_dict)
+
     def create_lah_nonneg_gd_accel_model(self, cfg, static_dict):
         # get A, lambd, ista_step
         A = static_dict['A']
@@ -1169,7 +1192,11 @@ class Workspace:
                 self.test_indices = np.arange(self.traj_length, self.traj_length+N_test)
                 self.q_mat_test = q_mat[self.test_indices, :]
             else:
-                
+                if N_train + N_test > q_mat.shape[0]:
+                    raise ValueError(
+                        f"N_train + N_test = {N_train + N_test} but the data setup "
+                        f"{folder} only has {q_mat.shape[0]} in-distribution problems; "
+                        f"rerun the setup with more problems or lower N_train / N_test")
                 rand_indices = np.random.choice(q_mat.shape[0], N_train + N_test, replace=False)
                 self.train_indices = rand_indices[:N_train]
                 self.q_mat_train = q_mat[self.train_indices, :]
@@ -1178,6 +1205,10 @@ class Workspace:
 
             if 'q_mat_ood' in jnp_load_obj.keys():
                 q_mat_ood = jnp.array(jnp_load_obj['q_mat_ood'])
+                if N_val > q_mat_ood.shape[0]:
+                    raise ValueError(
+                        f"N_val = {N_val} but the data setup {folder} only has "
+                        f"{q_mat_ood.shape[0]} out-of-distribution problems")
                 self.val = True
                 val_rand_indices = np.random.choice(q_mat_ood.shape[0], N_val, replace=False)
                 self.val_indices = val_rand_indices[:N_val]

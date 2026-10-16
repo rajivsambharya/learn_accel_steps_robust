@@ -51,7 +51,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         # adam with its default hyperparameters (kingma & ba 2015)
         # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=1.0,
         #                             beta1=0.9, beta2=0.999, epsilon=1e-8, jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=10.0,
+        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
                                        jit=self.jit)
         # self.adam_eval_fn = partial(k_steps_eval_logistic_backtracking, num_points=num_points, eta0=1.0,
         #                                jit=self.jit)

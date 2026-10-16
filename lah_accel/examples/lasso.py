@@ -42,12 +42,16 @@ def run_lista(run_cfg):
     # get the ista values
     evals = gram_evals(jnp.array(D))
     step = 1 / evals.max()
-    lambd = .1
+    # same lambd the z_stars were solved with, so lista's objective gaps are
+    # measured against the right problem
+    lambd = setup_cfg['lambd']
     eta = lambd * step
 
-    # form W
-    W = get_W(D)
-    W, D = jnp.array(W), jnp.array(D)
+    # W = get_W(D) is alista's analytic weight matrix; lista never uses it, and
+    # the cvxpy problem behind it (an m x n matrix variable) runs out of memory
+    # at the larger problem sizes
+    W = None
+    D = jnp.array(D)
 
     static_dict = dict(D=D, W=W, step=step, eta=eta, lambd=lambd)
 
@@ -135,11 +139,15 @@ def setup_probs(setup_cfg):
     D = D / np.linalg.norm(D, axis=0)
 
     # z_orig = np.random.normal(size=(N, n_orig))
+    # the N_ood out-of-distribution problems come on top of the N = N_train +
+    # N_test in-distribution ones (they used to be carved out of N, which left
+    # only N - N_ood in-distribution problems)
     ood_num = setup_cfg['N_ood']
     z_orig = np.vstack([
         np.random.normal(scale=cfg.ood_mult, size=(ood_num, n_orig)),
-        np.random.normal(scale=1.0, size=(N - ood_num, n_orig))
+        np.random.normal(scale=1.0, size=(N, n_orig))
     ])
+    N = N + ood_num
     mask = np.random.choice(2, size=(N, n_orig), replace=True, p=[0.9, 0.1])
     z_stars = np.multiply(z_orig, mask)
 
