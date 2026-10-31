@@ -1504,11 +1504,10 @@ class Workspace:
                 # perturb slightly for training
                 self.l2ws_model.init_params()
             elif self.l2ws_model.algo == 'lah_accel_logisticgd' or self.l2ws_model.algo == 'lah_gd_accel':
-                # adam
-                self.eval_iters_train_and_test('adam', None)
-                # barzilai-borwein, with its initial step tuned on the training set
-                if hasattr(self.l2ws_model, 'tune_bb_eta0'):
-                    self.l2ws_model.tune_bb_eta0()
+                # the 'adam' column (nesterov with backtracking) only exists for lah_gd_accel
+                if self.l2ws_model.algo == 'lah_gd_accel':
+                    self.eval_iters_train_and_test('adam', None)
+                # barzilai-borwein, initial step 1/L
                 self.eval_iters_train_and_test('bb', None)
 
 
@@ -1547,8 +1546,11 @@ class Workspace:
         accel_method = self.l2ws_model.algo == 'lah_accel_logisticgd' or \
             self.algo in ('lah_accel_scs', 'lah_accel_osqp') or \
             (self.l2ws_model.algo in ('lah_ista', 'lah_nonneg_gd') and self.l2ws_model.accel)
-        has_steady_state_phase = not accel_method
-        if accel_method:
+        # train_unrolls = 0 (l2ws regressing the warm start) has no steps to split
+        # into progressive windows, so it is a single training phase as well
+        single_phase = accel_method or self.train_unrolls == 0
+        has_steady_state_phase = not single_phase
+        if single_phase:
             num_progressive_trains = 1
         else:
             num_progressive_trains = int(self.l2ws_model.step_varying_num * self.l2ws_model.num_const_steps / self.train_unrolls) + 1

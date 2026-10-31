@@ -12,6 +12,10 @@ git clone https://github.com/rajivsambharya/learn_accel_steps_robust.git
 pip install -e ".[dev]"
 ```
 
+### MNIST data (needed for the logistic regression example)
+For the logistic regression example, we use the MNIST digits from the EMNIST dataset found at https://www.nist.gov/itl/products-and-services/emnist-dataset.
+Download the binary (gzip) version and place the `emnist-digits-*` files in `lah_accel/examples/mnist_data/`.
+
 ## Overall flow and commands
 Reproducing our results for our learning algorithm hyperparameters accel (LAH Accel) method involves 3 steps:
 - data setup: solves all of the training and test instances and saves the parameters and solutions

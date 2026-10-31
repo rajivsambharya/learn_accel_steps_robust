@@ -291,8 +291,15 @@ def plot_step_sizes(example, cfg):
         L = (4 / step_size - mu) / 3
         quad, prox, obj = True, False, 'dist'
 
+    # each run is certified with the L of its own problems: entries can come
+    # from runs on different data setups, and the nesterov run's L would
+    # misjudge the others' steps (e.g. call a certified schedule unbounded)
+    L_list = [L] * len(cfg.plot_step_sizes)
+    if example in ['lasso', 'logistic_regression', 'nonneg_ls']:
+        L_list = [get_run_smoothness(example, cfg, entry) for entry in cfg.plot_step_sizes]
+
     for i in range(len(cfg.plot_step_sizes)):
-        worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], mu, L, quad, prox, obj))
+        worst_case_vals.append(get_pep_results(step_sizes_list[i], momentum_list[i], mu, L_list[i], quad, prox, obj))
     # titles = [fr'nesterov: $\gamma = {worst_case_vals[0]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[1]:.3f}$', fr'some robustness: $\gamma = {worst_case_vals[2]:.3f}$', r'no robustness: $\gamma =\infty$']
     titles = []
     for i in range(len(cfg.plot_step_sizes)):
@@ -323,7 +330,7 @@ def plot_step_sizes(example, cfg):
         axes[i].set_xlabel('iterations')
         axes[i].set_title(titles[i])
         axes[i].bar(np.arange(step_size_iters), step_sizes_list[i][:step_size_iters], color='black')
-        axes[i].hlines(2 / L, 0, step_size_iters, color=colors[7])
+        axes[i].hlines(2 / L_list[i], 0, step_size_iters, color=colors[7])
     # plt.gca().yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=6))
     plt.tight_layout()
     plt.savefig('step_sizes.pdf', bbox_inches='tight')
@@ -584,6 +591,14 @@ def plot_step_sizes(example, cfg):
         pdb.set_trace()
         
     
+def get_run_smoothness(example, cfg, method):
+    """L of the problems a run was trained on: its untrained step size is 1/L"""
+    dt = resolve_datetime(example, cfg.methods[method])
+    orig_cwd = hydra.utils.get_original_cwd()
+    df = read_csv(f"{orig_cwd}/outputs/{example}/train_outputs/{dt}/lah_weights/no_train/params.csv")
+    return 1 / df.to_numpy()[0, 1]
+
+
 def resolve_datetime(example, dt):
     """An empty datetime means: use the most recent train_outputs run for this example."""
     if not dt:
@@ -675,8 +690,9 @@ def create_lah_results_unconstrained(example, cfg, split='test'):
     acc_reductions_dict = populate_acc_reductions_dict(accs_dict)
     # takes a different form accuracies_dict['lah'][0.01] = reduction (it is a single fraction)
 
-    # do the plotting
-    plot_results_dict_unconstrained(example, results_dict, gains_dict, cfg.num_iters, split=split)
+    # do the plotting (methods in plot_exclude stay in the tables but are left off the plot)
+    plot_results_dict_unconstrained(example, results_dict, gains_dict, cfg.num_iters, split=split,
+                                    plot_exclude=cfg.get('plot_exclude', []))
 
     # create the tables (need the accuracies and reductions for this)
     create_acc_reduction_tables(accs_dict, acc_reductions_dict, split=split)
@@ -838,7 +854,7 @@ def plot_results_dict_constrained(results_dict, gains_dict, num_iters, plot_excl
     plt.clf()
 
 
-def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters, split='test'):
+def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters, split='test', plot_exclude=()):
     # fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(18, 12), sharey='row') #, sharey=True)
     plt.figure(figsize=(12, 6))
     plt.yscale('log')
@@ -870,6 +886,8 @@ def plot_results_dict_unconstrained(example, results_dict, gains_dict, num_iters
             continue
         # if method in ['backtracking', 'lista', 'lista10000', 'l2ws', 'l2ws10000']:
         if method in ['backtracking', 'lista', 'l2ws', 'bb']: #, 'l2ws10000']:
+            continue
+        if method in plot_exclude:
             continue
 
         style = titles_2_styles[method]
@@ -1163,7 +1181,11 @@ def get_rkf_vis_data(example, dt, ood=False, nn=False):
         directory = f"{dt_path}/visualize_val"
     else:
         directory = f"{dt_path}/visualize_test"
-    last_folder = find_last_folder_starting_with(directory, 'train_epoch')
+    # a polished run is evaluated with its polished params, so show those
+    if os.path.isdir(f"{directory}/robustness_polished"):
+        last_folder = 'robustness_polished'
+    else:
+        last_folder = find_last_folder_starting_with(directory, 'train_epoch')
     if nn:
         last_folder = 'no_train'
 

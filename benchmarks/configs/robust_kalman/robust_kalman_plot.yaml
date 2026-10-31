@@ -9,17 +9,22 @@ methods:
   lm10000: 2025-07-03/23-36-04 #2024-06-21/10-14-53
   lm: 2025-07-03/15-17-49
   prev_sol: 2025-07-06/23-00-30 #2025-06-27/19-18-26 #2025-06-03/15-15-51 #2025-05-11/11-48-07
-  # robust lah accel: most recent pep lambda = 0.1 run (pep_target 0.1, polished, gamma = 0.09991)
-  lah_accel_1: 2026-10-12/14-41-04 #2025-06-29/23-15-09 (lambda = 10)
+  # robust lah accel: most recent pep lambda = 0.1 run (pep_target 0.1, 300 epochs, polished, gamma = 0.09992)
+  lah_accel_1: 2026-10-16/12-40-41 #2026-10-12/14-41-04 (lambda = 0.1, 100 epochs) #2025-06-29/23-15-09 (lambda = 10)
   # lah_accel_1: 2025-05-11/11-48-07
   # l2ws10000: 2025-05-10/23-33-14
   l2ws10000: 2025-07-07/18-00-22
   l2ws: 2025-07-07/18-01-54
 num_iters: 20 #45
 
-l2ws_vis_dt: 2025-05-20/17-27-44 #2025-05-19/15-59-07
-lah_vis_dt: 2025-05-20/16-56-00 #2025-05-19/16-41-22
-lm_vis_dt: 2025-05-20/17-27-44
+# trajectory visuals (positions_*.pdf); all three runs must share the same data
+# setup so the curves are drawn for the same problem instances
+#   lah_vis_dt  -> blue:   lah accel w/ robustness (pep lambda = 0.1, polished)
+#   l2ws_vis_dt -> orange: lah (no acceleration; = learned_no_accel)
+#   lm_vis_dt   -> gray:   no learning (no_train iterates of this run)
+lah_vis_dt: 2026-10-16/12-40-41 #2026-10-12/14-41-04 #2025-05-20/16-56-00 #2025-05-19/16-41-22
+l2ws_vis_dt: 2025-07-06/23-00-30 #2025-05-20/17-27-44 #2025-05-19/15-59-07
+lm_vis_dt: 2026-10-16/12-40-41 #2026-10-12/14-41-04 #2025-05-20/17-27-44
 
 # lah_vis_dt: 2025-05-19/17-50-51 #2024-10-09/18-04-59 #21-51-00 #18-04-59
 # l2ws_vis_dt: 2025-05-19/21-18-20 #16-33-37 #21-48-57 #20-18-06 #18-52-01

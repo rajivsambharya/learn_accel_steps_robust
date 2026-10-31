@@ -5,7 +5,7 @@ from jax import random, vmap
 
 import numpy as np
 
-from lah_accel.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_adam_logistic, k_steps_eval_adagrad_logistic, k_steps_eval_logistic_backtracking, k_steps_eval_logistic_bb
+from lah_accel.algo_steps_logistic import k_steps_eval_lah_nesterov_gd, k_steps_train_lah_nesterov_gd, k_steps_eval_nesterov_logisticgd, compute_gradient, k_steps_eval_logistic_backtracking, k_steps_eval_logistic_bb
 from lah_accel.l2o_model import L2Omodel
 from PEPit.functions import SmoothStronglyConvexFunction
 import cvxpy as cp
@@ -48,15 +48,7 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                        jit=self.jit)
         self.nesterov_eval_fn = partial(k_steps_eval_nesterov_logisticgd, num_points=num_points,
                                        jit=self.jit)
-        # adam with its default hyperparameters (kingma & ba 2015)
-        # self.adam_eval_fn = partial(k_steps_eval_adam_logistic, num_points=num_points, step_size=1.0,
-        #                             beta1=0.9, beta2=0.999, epsilon=1e-8, jit=self.jit)
-        self.adam_eval_fn = partial(k_steps_eval_adagrad_logistic, num_points=num_points, step_size=0.001,
-                                       jit=self.jit)
-        # self.adam_eval_fn = partial(k_steps_eval_logistic_backtracking, num_points=num_points, eta0=1.0,
-        #                                jit=self.jit)
-        # the bb initial step is tuned on the training instances by tune_bb_eta0
-        # before bb is evaluated; 1/L is only the placeholder until then
+        # bb with initial step 1/L (no tuning)
         self.bb_eta0 = 1.0 / self.smooth_param
         self.bb_eval_fn = partial(k_steps_eval_logistic_bb, num_points=num_points,
                                   eta0=self.bb_eta0, jit=self.jit)
@@ -73,8 +65,6 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         # end-to-end loss fn for silver evaluation
         self.loss_fn_eval_silver = e2e_loss_fn(bypass_nn=False, diff_required=False, 
                                                special_algo='silver')
-        self.loss_fn_eval_adam = e2e_loss_fn(bypass_nn=False, diff_required=False,
-                                               special_algo='adam')
         self.loss_fn_eval_bb = e2e_loss_fn(bypass_nn=False, diff_required=False,
                                             special_algo='bb')
 
@@ -85,35 +75,6 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
         self.pep_layer = create_nesterov_pep_sdp_layer(self.smooth_param, self.num_pep_iters)
         
         
-    def tune_bb_eta0(self, multipliers=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0), variant=None):
-        """
-        pick the BB initial step eta0 = m / L that gives the smallest mean
-        objective gap after train_unrolls steps on the training instances --
-        the same instances and horizon the learned method is trained on --
-        so the baseline is tuned as carefully as the learned method
-        """
-        num_points = self.num_points
-        if variant is not None:
-            self.bb_variant = variant
-        variant = getattr(self, 'bb_variant', 'bb1')
-        z0 = jnp.zeros((self.q_mat_train.shape[0], self.n))
-        k = self.train_unrolls
-        gaps = []
-        for m in multipliers:
-            eta0 = float(m / self.smooth_param)
-            fn = partial(k_steps_eval_logistic_bb, k=k, num_points=num_points, eta0=eta0,
-                         supervised=True, jit=True, variant=variant)
-            out = vmap(lambda z, q, zs: fn(z0=z, q=q, z_star=zs))(z0, self.q_mat_train, self.z_stars_train)
-            gap = float(jnp.mean(out[3][:, -1]))
-            gaps.append(gap if np.isfinite(gap) else np.inf)
-            print(f'bb eta0 tuning: eta0={m}/L  mean train obj gap at k={k}: {gap:.4e}')
-        best = multipliers[int(np.argmin(gaps))]
-        self.bb_eta0 = float(best / self.smooth_param)
-        self.bb_eval_fn = partial(k_steps_eval_logistic_bb, num_points=num_points,
-                                  eta0=self.bb_eta0, jit=self.jit, variant=variant)
-        print(f'bb eta0 tuning ({variant}): chose eta0={best}/L = {self.bb_eta0:.4e}')
-        return self.bb_eta0
-
     def pepit_nesterov_check(self, params):
         return pepit_nesterov(0, self.smooth_param._value, params)
 
@@ -326,15 +287,6 @@ class LAHAccelLOGISTICGDmodel(L2Omodel):
                                    q=q,
                                 #    params=stochastic_params,
                                     params=1/self.smooth_param,
-                                   supervised=supervised,
-                                   z_star=z_star)
-                z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]
-                angles = None
-            elif special_algo == 'adam':
-
-                eval_out = self.adam_eval_fn(k=iters,
-                                   z0=z0,
-                                   q=q,
                                    supervised=supervised,
                                    z_star=z_star)
                 z_final, iter_losses, z_all_plus_1 = eval_out[0], eval_out[1], eval_out[2]

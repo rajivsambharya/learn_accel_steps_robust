@@ -312,9 +312,11 @@ def k_steps_train_fista_l2ws(k, z0, q, ista_step, lambd, A, supervised, z_star, 
                               )
     z_all = jnp.zeros((k, z0.size))
     val = z0, z0, 1, iter_losses, obj_diffs
+    if k == 0:
+        # l2ws trains the warm start itself (train_unrolls = 0); jax still traces
+        # a zero-trip fori_loop body, whose indexing into the empty iter_losses fails
+        return z0, iter_losses
     start_iter = 0
-    import pdb
-    pdb.set_trace()
     if jit:
         out = lax.fori_loop(start_iter, k, fp_eval_partial, val)
     else:

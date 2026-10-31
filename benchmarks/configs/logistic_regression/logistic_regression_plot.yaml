@@ -34,18 +34,22 @@
 
 methods:
   # lah_accel_1: 2025-04-25/11-31-10
-  # empty string = most recent train_outputs run for this example
-  lah_accel_1: ''
-  bb: 2026-09-30/16-18-06
+  # robust lah accel, target gamma = 0.2: most recent pep lambda = 0.1 run (polished, gamma = 0.199)
+  lah_accel_1: 2026-10-03/22-16-20
+  # bb from the newest run
+  bb: 2026-10-15/22-30-21 #2026-09-30/16-18-06
   backtracking: 2025-06-30/22-12-46
   nearest_neighbor: 2025-06-30/17-35-43
   nesterov: 2025-06-30/17-35-43
   learned_no_accel: 2025-03-27/13-41-24 #2025-06-30/20-30-41
   lah_accel: 2025-06-30/17-09-30
-  lah_accel_2: 2025-06-26/13-51-50
+  # robust lah accel, target gamma = 0.8: most recent pep lambda = 0.1 run (polished, gamma = 0.665)
+  lah_accel_2: 2026-10-15/22-30-21 #2025-06-26/13-51-50
   l2ws: 2025-06-30/23-06-56
   l2ws10000: 2025-07-01/14-46-40
 num_iters: 41
 step_size_iters: 40
+# left off obj_diff_test.pdf but kept in the tables
+plot_exclude: ['l2ws10000']
 
 plot_step_sizes: ['nesterov', 'lah_accel', 'lah_accel_1', 'learned_no_accel']

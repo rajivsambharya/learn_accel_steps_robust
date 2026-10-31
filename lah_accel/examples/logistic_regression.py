@@ -203,8 +203,11 @@ def get_mnist(emnist=True):
         # Load MNIST dataset
         # x_train, y_train = load_mnist('mnist_data', kind='train')
         # x_test, y_test = load_mnist('mnist_data', kind='t10k')
-        x_train, y_train = load_mnist(f"{orig_cwd}/lah/examples/mnist_data", kind='train')
-        x_test, y_test = load_mnist(f"{orig_cwd}/lah/examples/mnist_data", kind='test') #kind='t10k')
+        # the emnist digits files live next to this module (see the README);
+        # this used to point at lah/examples, which the package rename removed
+        mnist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mnist_data')
+        x_train, y_train = load_mnist(mnist_dir, kind='train')
+        x_test, y_test = load_mnist(mnist_dir, kind='test') #kind='t10k')
 
         # Normalize pixel values
         x_train = x_train.astype('float32') / 255

@@ -432,6 +432,12 @@ class L2Omodel(object):
         z0 is only used if the loss_method is first_2_last
         """
         # return iter_losses[-1]
+        if iter_losses.size == 0:
+            # no algorithm steps unrolled (e.g. l2ws with train_unrolls = 0): the
+            # warm start itself is regressed onto z_star
+            if not supervised:
+                raise ValueError("train_unrolls = 0 needs supervised = True")
+            return jnp.linalg.norm(z_last - z_star)
         if supervised:
             if loss_method == 'constant_sum':
                 loss = iter_losses[1:].sum()

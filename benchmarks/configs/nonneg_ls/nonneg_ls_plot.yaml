@@ -1,15 +1,40 @@
-methods: 
-  lah_accel: 2025-07-14/15-46-35
-  nearest_neighbor: 2025-07-14/19-41-25 #2025-06-04/13-51-48 #2025-05-21/13-12-53
-  nesterov: 2025-07-14/19-41-25 #2025-06-04/13-51-48 #2025-05-21/13-12-53
-  lah_accel_1: 2025-07-14/19-41-25  #2025-05-22/13-24-54
-  # learned_no_accel_safeguard: 2025-05-22/13-24-54
-  learned_no_accel: 2025-07-22/23-13-40 #2025-07-14/15-48-08 #2025-05-21/12-41-30
-  # backtracking: 2025-07-15/21-03-34
-  # l2ws: 2025-07-16/16-42-37
-  l2ws10000: 2025-07-16/16-46-58 #2025-06-09/20-54-14
-num_iters: 30
-step_size_iters: 30
+# all runs share one data setup (data_setup_copied hash 75b4e6dd); method names
+# match the columns the paper's nnls table reads
+methods:
+  # vanilla (nesterov), nearest neighbor and line search: baseline columns of a run
+  # evaluated for 200 iterations (same problems; its nesterov curve matches the
+  # lambda = 0.1 run's), so they are not cut off at the 50-iteration eval horizon
+  nesterov: 2026-10-08/14-12-26 #2026-10-04/18-13-43
+  nearest_neighbor: 2026-10-08/14-12-26 #2026-10-04/18-13-43
+  backtracking: 2026-10-08/14-12-26
+  # lah (no acceleration)
+  learned_no_accel: 2026-09-29/09-27-35
+  # lah accel, no robustness (pep lambda = 0, same 200 epochs / settings as the ablation)
+  lah_accel: 2026-10-04/19-40-02
+  # lah accel robust: pep lambda = 0.1 ablation run (pep_target 0.9, polished, gamma = 0.898)
+  lah_accel_1: 2026-10-04/18-13-43
+  # l2ws: caution -- these ran on a different data setup (hash dc433837), so they
+  # are not evaluated on the same problems as the runs above, and stopped early
+  l2ws: 2026-10-15/09-08-21 # N_train = 10, stopped at epoch 250 of 2000
+  l2ws10000: 2026-10-15/08-35-44 # N_train = 10000, stopped at epoch 100 of 2000
+num_iters: 20
+step_size_iters: 20
+# left off obj_diff_test.pdf but kept in the tables
+plot_exclude: ['l2ws10000']
+
+# previous methods block
+# methods: 
+#   lah_accel: 2025-07-14/15-46-35
+#   nearest_neighbor: 2025-07-14/19-41-25 #2025-06-04/13-51-48 #2025-05-21/13-12-53
+#   nesterov: 2025-07-14/19-41-25 #2025-06-04/13-51-48 #2025-05-21/13-12-53
+#   lah_accel_1: 2025-07-14/19-41-25  #2025-05-22/13-24-54
+#   # learned_no_accel_safeguard: 2025-05-22/13-24-54
+#   learned_no_accel: 2025-07-22/23-13-40 #2025-07-14/15-48-08 #2025-05-21/12-41-30
+#   # backtracking: 2025-07-15/21-03-34
+#   # l2ws: 2025-07-16/16-42-37
+#   l2ws10000: 2025-07-16/16-46-58 #2025-06-09/20-54-14
+# num_iters: 30
+# step_size_iters: 30
 
 # methods: 
 #   lah_accel: 2025-07-14/15-46-35
@@ -26,6 +51,7 @@ step_size_iters: 30
 #   l2ws10000: 2025-07-16/16-46-58 #2025-06-09/20-54-14
 # num_iters: 20
 # step_size_iters: 20
+
 
 plot_step_sizes: ['nesterov', 'lah_accel', 'lah_accel_1', 'learned_no_accel']
 
